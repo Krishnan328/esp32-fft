@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>FFT-Based Audio Processing on ESP32 Documentation</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 2em;
+      line-height: 1.6;
+      background-color: #f4f4f4;
+      color: #333;
+    }
+    header, section {
+      background: #fff;
+      padding: 1em 2em;
+      margin-bottom: 1.5em;
+      border-radius: 5px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    h1, h2, h3 {
+      color: #2c3e50;
+    }
+    code {
+      background-color: #eaeaea;
+      padding: 0.2em 0.4em;
+      border-radius: 3px;
+      font-family: "Courier New", Courier, monospace;
+    }
+    pre {
+      background-color: #eaeaea;
+      padding: 1em;
+      border-radius: 5px;
+      overflow-x: auto;
+    }
+    .note {
+      background: #ffffe0;
+      padding: 0.5em;
+      border-left: 4px solid #ffeb3b;
+      margin: 1em 0;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>FFT-Based Audio Processing on ESP32</h1>
+    <p>This documentation explains the code that configures an ESP32 I2S peripheral to capture audio from an INMP441 microphone, performs a Fast Fourier Transform (FFT) on the captured samples, and logs the dominant frequency.</p>
+  </header>
+
+  <section>
+    <h2>Overview</h2>
+    <p>The code uses the ESP-IDF Hardware Abstraction Layer (HAL) and services along with the Rust FFT library (<code>rustfft</code>) to capture and analyze audio. The program continuously reads audio data, converts it to normalized floating-point samples, computes the FFT, and determines the dominant frequency from the captured audio.</p>
+  </section>
+
+  <section>
+    <h2>Key Components</h2>
+    <ul>
+      <li><strong>esp_idf_hal::peripherals::Peripherals</strong> – Initializes the ESP32 hardware peripherals.</li>
+      <li><strong>esp_idf_hal::i2s::I2sDriver</strong> – Manages the I2S interface for audio input.</li>
+      <li><strong>esp_idf_hal::i2s::config::{DataBitWidth, StdConfig}</strong> – Provides configuration for the I2S driver (sample rate, bit width, etc.).</li>
+      <li><strong>esp_idf_hal::gpio</strong> – Manages the GPIO pins for I2S signals.</li>
+      <li><strong>esp_idf_svc::log::EspLogger</strong> – Sets up logging for debugging and information purposes.</li>
+      <li><strong>rustfft::{FftPlanner, num_complex::Complex}</strong> – Used to perform the FFT on the audio data.</li>
+      <li><strong>anyhow::Result</strong> – Provides error handling using the <code>anyhow</code> crate.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Code Flow and Functionality</h2>
+    <h3>1. Initialization</h3>
+    <p>The program starts by linking any necessary patches and initializing the logger:</p>
+    <pre><code>
+esp_idf_svc::sys::link_patches();
+EspLogger::initialize_default();
+    </code></pre>
+    <p>It then takes ownership of the available hardware peripherals and GPIO pins.</p>
+
+    <h3>2. I2S Configuration</h3>
+    <p>The I2S configuration is set up for the Philips I2S standard with a sample rate of 44.1 kHz and a data width of 16 bits. The configuration is tailored for an INMP441 microphone:</p>
+    <pre><code>
+let config = StdConfig::philips(44100, DataBitWidth::Bits16);
+    </code></pre>
+    <p>The I2S driver is then initialized in standard receive mode. The pins for Bit Clock (BCLK), Data In (DIN), and Word Select (WS) are specified, while the Master Clock (MCLK) is set as <code>None</code> (using an explicit type for clarity):</p>
+    <pre><code>
+let mut i2s = I2sDriver::new_std_rx(
+    peripherals.i2s0,
+    &config,
+    pins.gpio14,       // BCLK (bit clock)
+    pins.gpio34,       // DIN (data in)
+    None::<AnyIOPin>,  // MCLK (not used)
+    pins.gpio15,       // WS (word select)
+)?;
+    </code></pre>
+    <p>The I2S receiver is enabled after configuration.</p>
+
+    <h3>3. Main Loop – Data Acquisition and Processing</h3>
+    <p>The main loop continuously performs the following steps:</p>
+    <ol>
+      <li>
+        <strong>Data Acquisition:</strong>
+        <p>A buffer is allocated to hold 1024 samples (each sample is 4 bytes, leading to a total of 4096 bytes). The I2S driver reads data into the buffer with a 1-second timeout. If fewer than 4096 bytes are read, a log entry is generated and the loop continues.</p>
+      </li>
+      <li>
+        <strong>Data Conversion:</strong>
+        <p>The 32-bit little-endian byte data is converted into <code>i32</code> values. Each value is then normalized to a floating-point number between -1.0 and 1.0 by dividing by <code>2^31</code> (2147483648.0).</p>
+      </li>
+      <li>
+        <strong>FFT Processing:</strong>
+        <p>
+          An FFT is performed on the normalized floating-point samples using the <code>rustfft</code> library:
+          <br>
+          <em>•</em> A planner creates an FFT plan for 1024 points.
+          <br>
+          <em>•</em> Samples are converted to a vector of <code>Complex&lt;f32&gt;</code> values (with the imaginary part set to 0.0).
+          <br>
+          <em>•</em> The FFT is processed in-place.
+        </p>
+      </li>
+      <li>
+        <strong>Dominant Frequency Detection:</strong>
+        <p>
+          The magnitudes of the FFT results are calculated for frequency bins up to the Nyquist frequency (first 512 bins). The code then finds the frequency bin (ignoring the DC component) with the highest magnitude and computes the corresponding frequency using the relation:
+          <br>
+          <code>frequency = bin_index * (sample_rate / fft_size)</code>.
+        </p>
+      </li>
+      <li>
+        <strong>Delay:</strong>
+        <p>A delay of 1 second is added before the next iteration using FreeRTOS's delay function.</p>
+      </li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Logging and Output</h2>
+    <p>The <code>log::info</code> macro is used to log information about the read data (including partial reads) and the computed dominant frequency in Hertz. This allows for real-time monitoring of the frequency analysis results.</p>
+  </section>
+
+  <section>
+    <h2>Dependencies and Libraries</h2>
+    <ul>
+      <li><strong>esp_idf_hal:</strong> Provides hardware abstractions and I2S driver implementations.</li>
+      <li><strong>esp_idf_svc:</strong> Supplies logging and system services.</li>
+      <li><strong>rustfft:</strong> Library for performing fast Fourier transforms.</li>
+      <li><strong>anyhow:</strong> Simplifies error handling by providing the <code>Result</code> type alias.</li>
+      <li><strong>log:</strong> Enables logging at various levels (info, error, etc.).</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Usage</h2>
+    <p>
+      To use this code on an ESP32 with an INMP441 microphone:
+    </p>
+    <ol>
+      <li>Ensure the ESP-IDF environment and Rust toolchain (with esp-idf support) are properly configured.</li>
+      <li>Connect the microphone to the specified GPIO pins:
+        <ul>
+          <li>GPIO14 for BCLK</li>
+          <li>GPIO34 for DIN</li>
+          <li>GPIO15 for WS</li>
+        </ul>
+      </li>
+      <li>Build and flash the firmware onto the ESP32 device.</li>
+      <li>Monitor the logs to see the dominant frequency computed from the incoming audio.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Notes and Considerations</h2>
+    <p>
+      <strong>Normalization:</strong> The sample normalization uses a divisor of 2<sup>31</sup>. Ensure that this fits the expected dynamic range of the captured data.
+    </p>
+    <p>
+      <strong>Data Width:</strong> Although the I2S is configured with 16-bit data, the code reads 32 bits per sample. Adjustments might be necessary depending on the actual microphone output and data representation.
+    </p>
+    <p>
+      <strong>Performance:</strong> FFT processing on a microcontroller requires careful management of resources. Ensure that the ESP32 has enough processing power for your application and that the FFT size meets your requirements.
+    </p>
+  </section>
+
+  <footer>
+    <p>Documentation generated for the FFT-based audio processing example using ESP-IDF HAL and rustfft.</p>
+  </footer>
+</body>
+</html>

@@ -40,16 +40,16 @@ fn main() -> Result<()> {
 
 	// Configure and initialize the I2S driver
 	let clock_config = StdClkConfig::from_sample_rate_hz(44100);
-	let slot_config = StdSlotConfig::philips_slot_default(DataBitWidth::Bits32, SlotMode::Mono);
+	let slot_config = StdSlotConfig::philips_slot_default(DataBitWidth::Bits16, SlotMode::Mono);
 	let config = StdConfig::new(Config::default(), clock_config, slot_config, StdGpioConfig::default());
 
 	let mut i2s = I2sDriver::new_std_rx(
 		peripherals.i2s0,
 		&config,
-		pins.gpio25,
-		pins.gpio26,
+		pins.gpio25,  // sck
+		pins.gpio26,  // sd
 		None::<AnyIOPin>,
-		pins.gpio27,
+		pins.gpio27, // ws
 	)?;
 
 	// Enable I2S receiver
@@ -240,12 +240,12 @@ fn main() -> Result<()> {
 				acc_index = 0;
 			}
 
-			FreeRtos::delay_ms(100);
+			// FreeRtos::delay_ms(10);
 		}
 	}).expect("Failed to spawn ftt thread!!!");
 
 	// Keep the main task alive
 	loop {
-		FreeRtos::delay_ms(1000);
+		FreeRtos::delay_ms(100);
 	}
 }

@@ -17,7 +17,7 @@ fn main() -> Result<()> {
 	let pins = peripherals.pins;
 
 	// Configure I2S for INMP441 (Philips I2S, 44.1 kHz, 24-bit, mono)
-	let config = StdConfig::philips(44100, DataBitWidth::Bits16);
+	let config = StdConfig::philips(44100, DataBitWidth::Bits32);
 
 	// Initialize I2S driver in standard receive mode
 	// For pins used with the I2S driver, we just pass them directly

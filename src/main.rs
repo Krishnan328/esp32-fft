@@ -246,6 +246,6 @@ async fn main() -> Result<()> {
 		// Small delay to avoid starving other tasks
 		// This introduces a 100ms gap between consecutive FFT analyses
 		info!("Waiting before next analysis cycle");
-		FreeRtos::delay_ms(100);
+		FreeRtos::delay_ms(1000);
 	}
 }

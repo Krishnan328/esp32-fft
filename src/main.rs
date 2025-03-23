@@ -58,7 +58,7 @@
 use anyhow::Result;
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::gpio::*;
-use esp_idf_hal::i2s::config::{DataBitWidth, StdConfig};
+use esp_idf_hal::i2s::config::{Config, DataBitWidth, SlotMode, StdClkConfig, StdConfig, StdGpioConfig, StdSlotConfig};
 use esp_idf_hal::i2s::I2sDriver;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_hal::task;
@@ -89,10 +89,12 @@ async fn main() -> Result<()> {
 	let pins = peripherals.pins;
 
 	// Configure I2S for INMP441 MEMS microphone
-	// - Philips I2S format (standard I2S protocol)
+	// - Standard I2S format (standard I2S protocol)
 	// - 44.1 kHz sample rate (standard audio rate)
-	// - 32-bit data width (INMP441 uses 24-bit output, but 32-bit alignment is common)
-	let config = StdConfig::philips(44100, DataBitWidth::Bits32);
+	// - 32-bit data width in Mono slot_mode (INMP441 uses 24-bit output, but 32-bit alignment is common)
+	let clock_config = StdClkConfig::from_sample_rate_hz(44100);
+	let slot_config = StdSlotConfig::philips_slot_default(DataBitWidth::Bits32, SlotMode::Mono);
+	let config = StdConfig::new(Config::default(), clock_config, slot_config, StdGpioConfig::default());
 	info!("I2S configured for 44.1 kHz, 32-bit depth");
 
 	// Initialize I2S driver in standard receive mode with appropriate pin connections

@@ -28,6 +28,7 @@ esp-idf-svc = { version = "0.51", features = ["critical-section", "embassy-time-
 anyhow = "1.0.97"
 esp-idf-hal = {version = "0.45.2", features = []}
 rustfft = "6.2.0"
+tokio = { version = "1.0.0", features = ["rt", "rt-multi-thread", "macros"] }
 
 [build-dependencies]
 embuild = "0.33"

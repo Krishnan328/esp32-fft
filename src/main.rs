@@ -1,13 +1,14 @@
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_hal::i2s::I2sDriver;
 use esp_idf_hal::i2s::config::{DataBitWidth, StdConfig};
-use esp_idf_hal::gpio::*;  // Add this import for GPIO pin types
+use esp_idf_hal::gpio::*;
 use esp_idf_svc::log::EspLogger;
 use rustfft::{FftPlanner, num_complex::Complex};
 use anyhow::Result;
 use log::info;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
 	// Initialize patches and logging
 	esp_idf_svc::sys::link_patches();
 	EspLogger::initialize_default();
@@ -20,8 +21,6 @@ fn main() -> Result<()> {
 	let config = StdConfig::philips(44100, DataBitWidth::Bits32);
 
 	// Initialize I2S driver in standard receive mode
-	// For pins used with the I2S driver, we just pass them directly
-	// They will be configured by the driver
 	let mut i2s = I2sDriver::new_std_rx(
 		peripherals.i2s0,
 		&config,
@@ -33,56 +32,91 @@ fn main() -> Result<()> {
 
 	i2s.rx_enable()?;
 
+	// Create FFT planner once, outside the loop
+	let mut planner = FftPlanner::new();
+	let fft = planner.plan_fft_forward(1024);
+
+	// Pre-compute Hann window coefficients
+	let hann_window: Vec<f32> = (0..1024)
+		.map(|i| 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / 1023.0).cos()))
+		.collect();
+
+	// Buffer for accumulated samples
+	let mut accumulated_buffer = Vec::with_capacity(4096);
+	let timeout = 100; // Shorter timeout to prevent long blocking
+
 	// Main loop
 	loop {
-		// Buffer for 1024 samples, each 32-bit (4 bytes)
-		let mut buffer = [0u8; 1024 * 4];
-		let timeout = 1000; // 1-second timeout
-		let bytes_read = i2s.read(&mut buffer, timeout)?;
-		if bytes_read != 4096 {
-			info!("Partial read: {} bytes", bytes_read);
-			continue;
+		// Use a smaller read buffer for more frequent yields
+		let mut buffer = [0u8; 512];
+
+		// Read data in chunks until we have enough for processing
+		while accumulated_buffer.len() < 4096 {
+			match i2s.read(&mut buffer, timeout) {
+				Ok(bytes_read) => {
+					accumulated_buffer.extend_from_slice(&buffer[..bytes_read]);
+				}
+				Err(e) => {
+					info!("I2S read error: {:?}", e);
+					break;
+				}
+			}
+
+			// Yield to scheduler occasionally
+			esp_idf_hal::task::yield_now().await;
 		}
 
-		// Convert byte buffer to f32 samples
-		let mut samples = Vec::with_capacity(1024);
-		for i in 0..1024 {
-			let offset = i * 4;
-			let val = i32::from_le_bytes([
-				buffer[offset],
-				buffer[offset + 1],
-				buffer[offset + 2],
-				buffer[offset + 3],
-			]);
-			let sample_f32 = (val as f32) / 2147483648.0; // Normalize by 2^31
-			samples.push(sample_f32);
+		// Process only if we have enough data
+		if accumulated_buffer.len() >= 4096 {
+			// Extract 1024 samples (4096 bytes)
+			let process_buffer = accumulated_buffer.drain(..4096).collect::<Vec<u8>>();
+
+			// Convert byte buffer to f32 samples with windowing
+			let mut samples = Vec::with_capacity(1024);
+			for i in 0..1024 {
+				let offset = i * 4;
+				let val = i32::from_le_bytes([
+					process_buffer[offset],
+					process_buffer[offset + 1],
+					process_buffer[offset + 2],
+					process_buffer[offset + 3],
+				]);
+
+				// Normalize and apply Hann window
+				let sample_f32 = (val as f32) / 2147483648.0 * hann_window[i];
+				samples.push(sample_f32);
+			}
+
+			// Prepare complex signal for FFT
+			let mut signal: Vec<Complex<f32>> = samples.into_iter()
+				.map(|s| Complex::new(s, 0.0))
+				.collect();
+
+			// Perform FFT
+			fft.process(&mut signal);
+
+			// Calculate properly scaled magnitudes (up to Nyquist frequency)
+			// Scale by 1/N for proper amplitude scaling
+			let scale_factor = 1.0 / 1024.0;
+			let magnitudes: Vec<f32> = signal.iter()
+				.take(512)
+				.map(|c| c.norm() * scale_factor)
+				.collect();
+
+			// Find dominant frequency (account for DC component properly)
+			let max_index = magnitudes.iter()
+				.enumerate()
+				.skip(1) // Skip DC component
+				.max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+				.unwrap()
+				.0;
+
+			// Calculate frequency (account for the skipped DC when using max_index)
+			let frequency = max_index as f32 * (44100.0 / 1024.0);
+			info!("Dominant frequency: {:.2} Hz", frequency);
 		}
 
-		// Perform FFT
-		let mut planner = FftPlanner::new();
-		let fft = planner.plan_fft_forward(1024);
-		let mut signal: Vec<Complex<f32>> = samples.into_iter()
-			.map(|s| Complex::new(s, 0.0))
-			.collect();
-		fft.process(&mut signal);
-
-		// Calculate magnitudes (up to Nyquist frequency)
-		let magnitudes: Vec<f32> = signal.iter()
-			.take(512)
-			.map(|c| c.norm())
-			.collect();
-
-		// Find dominant frequency
-		let max_index = magnitudes.iter()
-			.enumerate()
-			.skip(1) // Skip DC component
-			.max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
-			.unwrap()
-			.0;
-		let frequency = max_index as f32 * (44100.0 / 1024.0);
-		info!("Dominant frequency: {} Hz", frequency);
-
-		// Delay before next iteration
-		esp_idf_hal::delay::FreeRtos::delay_ms(1000);
+		// Small delay to avoid starving other tasks
+		esp_idf_hal::delay::FreeRtos::delay_ms(10);
 	}
 }

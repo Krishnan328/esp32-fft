@@ -130,14 +130,38 @@ fn main() -> Result<()> {
 			let mut max_index = 0;
 
 			for i in 0..FREQUENCY_MAGNITUDE_LENGHT {
-				magnitudes[i] = samples[i].norm() * scale_factor;
-				if magnitudes[i] > max_mag {
+				magnitudes[i] = samples[i].norm() * scale_factor; // Magnitude from FFT
+				let frequency = i as f32 * FREQ_BIN_WIDTH;
+				let threshold = if frequency < AMPLITUDE_THRESHOLD.frequency_cutoff {
+					AMPLITUDE_THRESHOLD.low_freq_threshold
+				} else {
+					AMPLITUDE_THRESHOLD.high_freq_threshold
+				};
+				if magnitudes[i] > threshold && magnitudes[i] > max_mag {
 					max_mag = magnitudes[i];
 					max_index = i;
 				}
 			}
 
-			let frequency: f32 = max_index as f32 * (SAMPLING_RATE as f32 / FFT_LENGTH as f32);
+			// Quadratic Interpolation to find dominant frequency
+			let frequency: f32 = if max_mag > 0.0 {
+				if max_index > 0 && max_index < FREQUENCY_MAGNITUDE_LENGHT - 1 {
+					let y_km1 = magnitudes[max_index - 1];
+					let y_k = magnitudes[max_index];
+					let y_kp1 = magnitudes[max_index + 1];
+					let denom = y_km1 - 2.0 * y_k + y_kp1;
+					if denom != 0.0 {
+						let p = 0.5 * (y_km1 - y_kp1) / denom;
+						(max_index as f32 + p) * FREQ_BIN_WIDTH
+					} else {
+						max_index as f32 * FREQ_BIN_WIDTH
+					}
+				} else {
+					max_index as f32 * FREQ_BIN_WIDTH
+				}
+			} else {
+				0.0
+			};
 
 			// Update shared state with new FFT data
 			match shared_state.write() {

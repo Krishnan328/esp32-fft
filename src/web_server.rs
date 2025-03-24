@@ -87,7 +87,8 @@ pub fn init_http_server(server_state: Arc<RwLock<SystemState>>) -> Result<EspHtt
 			};
 
 			// Create JSON string from the FFT data
-			let mut json = String::from("{\"magnitudes\":[");
+			let mut json = String::with_capacity(12000);
+			json.push_str("{\"magnitudes\":[");
 			for (i, &mag) in state.magnitudes.iter().enumerate() {
 				if i > 0 {
 					json.push(',');

@@ -4,12 +4,10 @@ mod web_server;
 use anyhow::Result;
 use constants::*;
 use esp_idf_hal::{
-	delay::FreeRtos,
 	gpio::*,
 	i2s::{
 		config::{
-			Config, DataBitWidth, SlotMode, StdClkConfig, StdConfig,
-			StdGpioConfig, StdSlotConfig,
+			Config, DataBitWidth, SlotMode, StdClkConfig, StdConfig, StdGpioConfig, StdSlotConfig,
 		},
 		I2sDriver,
 	},
@@ -40,21 +38,17 @@ fn main() -> Result<()> {
 	let modem = peripherals.modem;
 
 	// Create shared state for FFT data with RwLock
-	let shared_state: Arc<RwLock<SystemState>> =
-		Arc::new(RwLock::new(SystemState {
-			magnitudes: vec![0.0; FREQUENCY_MAGNITUDE_LENGHT],
-			dominant_frequency: 0.0,
-		}));
+	let shared_state: Arc<RwLock<SystemState>> = Arc::new(RwLock::new(SystemState {
+		magnitudes: vec![0.0; FREQUENCY_MAGNITUDE_LENGHT],
+		dominant_frequency: 0.0,
+	}));
 
 	// Clone state for the Wi-Fi/server thread
 	let server_state = shared_state.clone();
 
 	// Configure and initialize the I2S driver
 	let clock_config = StdClkConfig::from_sample_rate_hz(SAMPLING_RATE);
-	let slot_config = StdSlotConfig::philips_slot_default(
-		DataBitWidth::Bits32,
-		SlotMode::Mono,
-	);
+	let slot_config = StdSlotConfig::philips_slot_default(DataBitWidth::Bits32, SlotMode::Mono);
 	let config = StdConfig::new(
 		Config::default(),
 		clock_config,
@@ -80,16 +74,11 @@ fn main() -> Result<()> {
 
 	// Pre-calculate Hann window for better performance
 	let hann_window: Vec<f32> = (0..FFT_LENGTH)
-		.map(|i| {
-			0.5 * (1.0
-				- (2.0 * std::f32::consts::PI * i as f32 / HANN_WINDOW_LENGHT)
-					.cos())
-		})
+		.map(|i| 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / HANN_WINDOW_LENGHT).cos()))
 		.collect();
 	info!("hann_window initialized with length: {}", hann_window.len());
 
-	spawn_wifi_thread(modem, server_state)
-		.expect("Failed to spawn WiFi/server thread!");
+	spawn_wifi_thread(modem, server_state).expect("Failed to spawn WiFi/server thread!");
 
 	let mut buffer: Vec<u8> = vec![0; FREQUENCY_MAGNITUDE_LENGHT];
 	let mut accumulated_buffer: Vec<u8> = vec![0; FFT_LENGTH_BYTES];
@@ -112,13 +101,11 @@ fn main() -> Result<()> {
 					break;
 				}
 			}
-			FreeRtos::delay_ms(1);
 		}
 
 		if acc_index >= FFT_LENGTH_BYTES {
 			// Process accumulated buffer for FFT
-			let mut samples: Vec<Complex<f32>> =
-				vec![Complex::<f32>::new(0.0, 0.0); FFT_LENGTH];
+			let mut samples: Vec<Complex<f32>> = vec![Complex::<f32>::new(0.0, 0.0); FFT_LENGTH];
 
 			// Apply Hann window and prepare samples
 			for i in 0..FFT_LENGTH {
@@ -138,8 +125,7 @@ fn main() -> Result<()> {
 
 			// Calculate magnitudes and find dominant frequency
 			let scale_factor: f32 = 1.0 / FFT_LENGTH as f32;
-			let mut magnitudes: Vec<f32> =
-				vec![0.0; FREQUENCY_MAGNITUDE_LENGHT];
+			let mut magnitudes: Vec<f32> = vec![0.0; FREQUENCY_MAGNITUDE_LENGHT];
 			let mut max_mag: f32 = 0.0;
 			let mut max_index = 0;
 
@@ -151,20 +137,16 @@ fn main() -> Result<()> {
 				}
 			}
 
-			let frequency: f32 =
-				max_index as f32 * (SAMPLING_RATE as f32 / FFT_LENGTH as f32);
+			let frequency: f32 = max_index as f32 * (SAMPLING_RATE as f32 / FFT_LENGTH as f32);
 
 			// Update shared state with new FFT data
 			match shared_state.write() {
 				Ok(mut state) => {
-					state.magnitudes.copy_from_slice(
-						&magnitudes[..FREQUENCY_MAGNITUDE_LENGHT],
-					);
+					state
+						.magnitudes
+						.copy_from_slice(&magnitudes[..FREQUENCY_MAGNITUDE_LENGHT]);
 					state.dominant_frequency = frequency;
-					info!(
-						"Updated FFT data, dominant frequency: {:.2} Hz",
-						frequency
-					);
+					info!("Updated FFT data, dominant frequency: {:.2} Hz", frequency);
 				}
 				Err(e) => {
 					error!("Failed to update FFT data: {:?}", e);

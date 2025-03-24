@@ -2,4 +2,4 @@ edition = "2024"
 hard_tabs = true
 tab_spaces = 4
 indent_style = "Block"
-max_width = 80
+max_width = 100

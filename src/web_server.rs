@@ -18,8 +18,7 @@ use std::{
 use crate::constants::*;
 use crate::SystemState;
 
-pub fn init_wifi_module() -> Result<(EspDefaultNvsPartition, EspSystemEventLoop)>
-{
+pub fn init_wifi_module() -> Result<(EspDefaultNvsPartition, EspSystemEventLoop)> {
 	let nvs = EspDefaultNvsPartition::take()?;
 
 	let sysloop = EspSystemEventLoop::take()?;
@@ -29,7 +28,7 @@ pub fn init_wifi_module() -> Result<(EspDefaultNvsPartition, EspSystemEventLoop)
 	Ok((nvs, sysloop))
 }
 
-pub fn init_wifi_ap(modem: Modem) -> Result<()> {
+pub fn init_wifi_ap(modem: Modem) -> Result<BlockingWifi<EspWifi<'static>>> {
 	let (nvs, sysloop) = init_wifi_module()?;
 
 	let mut wifi = BlockingWifi::wrap(
@@ -49,15 +48,18 @@ pub fn init_wifi_ap(modem: Modem) -> Result<()> {
 	.expect("Failed to set WiFi configuration");
 
 	wifi.start().expect("Failed to start WiFi");
-	info!("WiFi Access Point started: SSID=`{}`, Password=`{}`", WIFI_SSID, WIFI_PASSWORD);
+	info!(
+		"WiFi Access Point started: SSID=`{}`, Password=`{}`",
+		WIFI_SSID, WIFI_PASSWORD
+	);
 
-	Ok(())
+	Ok(wifi)
 }
 
-pub fn init_http_server(server_state: Arc<RwLock<SystemState>>) -> Result<()> {
+pub fn init_http_server(server_state: Arc<RwLock<SystemState>>) -> Result<EspHttpServer<'static>> {
 	info!("Starting HTTP server...");
-	let mut server = EspHttpServer::new(&Configuration::default())
-		.expect("Failed to create HTTP server");
+	let mut server =
+		EspHttpServer::new(&Configuration::default()).expect("Failed to create HTTP server");
 
 	// Serve the main HTML page
 	server
@@ -72,62 +74,50 @@ pub fn init_http_server(server_state: Arc<RwLock<SystemState>>) -> Result<()> {
 	// API endpoint to get FFT data as JSON
 	let api_state = server_state.clone();
 	server
-		.fn_handler(
-			"/api/fft",
-			esp_idf_svc::http::Method::Get,
-			move |request| {
-				let state = match api_state.read() {
-					Ok(state) => state,
-					Err(_) => {
-						// Handle lock error gracefully
-						let mut resp = request.into_response(
-							500,
-							Some("Internal Server Error"),
-							&[],
-						)?;
-						resp.write(b"Internal server error")?;
-						return Ok(());
-					}
-				};
-
-				// Create JSON string from the FFT data
-				let mut json = String::from("{\"magnitudes\":[");
-				for (i, &mag) in state.magnitudes.iter().enumerate() {
-					if i > 0 {
-						json.push(',');
-					}
-					json.push_str(&format!("{:.6}", mag));
+		.fn_handler("/api/fft", esp_idf_svc::http::Method::Get, move |request| {
+			let state = match api_state.read() {
+				Ok(state) => state,
+				Err(_) => {
+					// Handle lock error gracefully
+					let mut resp =
+						request.into_response(500, Some("Internal Server Error"), &[])?;
+					resp.write(b"Internal server error")?;
+					return Ok(());
 				}
-				json.push_str("],\"dominantFrequency\":");
-				json.push_str(&format!("{:.2}", state.dominant_frequency));
-				json.push('}');
+			};
 
-				let mut resp = request.into_ok_response()?;
-				resp.write(json.as_bytes())?;
-				Ok::<(), EspIOError>(())
-			},
-		)
+			// Create JSON string from the FFT data
+			let mut json = String::from("{\"magnitudes\":[");
+			for (i, &mag) in state.magnitudes.iter().enumerate() {
+				if i > 0 {
+					json.push(',');
+				}
+				json.push_str(&format!("{:.6}", mag));
+			}
+			json.push_str("],\"dominantFrequency\":");
+			json.push_str(&format!("{:.2}", state.dominant_frequency));
+			json.push('}');
+
+			let mut resp = request.into_ok_response()?;
+			resp.write(json.as_bytes())?;
+			Ok::<(), EspIOError>(())
+		})
 		.expect("Failed to register API handler");
 
 	info!("HTTP server started - Connect to http://192.168.71.1");
-	Ok(())
+	Ok(server)
 }
 
-pub fn spawn_wifi_thread(
-	modem: Modem,
-	server_state: Arc<RwLock<SystemState>>,
-) -> Result<()> {
+pub fn spawn_wifi_thread(modem: Modem, server_state: Arc<RwLock<SystemState>>) -> Result<()> {
 	let wifi_thread_builder = thread::Builder::new()
 		.stack_size(8192)
 		.name("Wi-Fi Server".into());
 
 	wifi_thread_builder
 		.spawn(move || {
-			init_wifi_ap(modem)
-				.expect("Failed to initialise Wi-Fi Access Point.");
+			let _wifi = init_wifi_ap(modem).expect("Failed to initialise Wi-Fi Access Point.");
 
-			init_http_server(server_state)
-				.expect("Failed to initialise HTTP server.");
+			let _server = init_http_server(server_state).expect("Failed to initialise HTTP server.");
 
 			loop {
 				FreeRtos::delay_ms(1000);

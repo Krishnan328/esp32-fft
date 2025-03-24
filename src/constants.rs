@@ -1,5 +1,3 @@
-
-
 pub const SAMPLING_RATE: u32 = 48000; // Audio Sampling Rate in Hertz
 
 /// Represents the number of samples that will be processed in a single FFT operation.

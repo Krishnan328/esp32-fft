@@ -1,20 +1,35 @@
-use std::string::String;
+mod constants;
+
 use anyhow::Result;
-use esp_idf_hal::delay::FreeRtos;
-use esp_idf_hal::gpio::*;
-use esp_idf_hal::i2s::{config::{Config, DataBitWidth, SlotMode, StdClkConfig, StdConfig, StdGpioConfig, StdSlotConfig}, I2sDriver};
-use esp_idf_hal::peripherals::Peripherals;
-use esp_idf_svc::log::EspLogger;
-use esp_idf_svc::wifi::{BlockingWifi, EspWifi};
-use esp_idf_svc::wifi::AccessPointConfiguration;
-use esp_idf_svc::http::server::{Configuration, EspHttpServer};
-use esp_idf_svc::io::EspIOError;
-use esp_idf_svc::eventloop::EspSystemEventLoop;
-use esp_idf_svc::nvs::EspDefaultNvsPartition;
-use log::{info, error};
+use constants::*;
+use esp_idf_hal::{
+	delay::FreeRtos,
+	gpio::*,
+	i2s::{
+		config::{
+			Config, DataBitWidth, SlotMode, StdClkConfig, StdConfig,
+			StdGpioConfig, StdSlotConfig,
+		},
+		I2sDriver,
+	},
+	peripherals::Peripherals,
+};
+use esp_idf_svc::{
+	eventloop::EspSystemEventLoop,
+	http::server::{Configuration, EspHttpServer},
+	io::EspIOError,
+	log::EspLogger,
+	nvs::EspDefaultNvsPartition,
+	wifi::AccessPointConfiguration,
+	wifi::{BlockingWifi, EspWifi},
+};
+use log::{error, info};
 use rustfft::{num_complex::Complex, FftPlanner};
-use std::sync::{Arc, Mutex, RwLock};
-use std::thread;
+use std::{
+	string::String,
+	sync::{Arc, RwLock},
+	thread,
+};
 
 // Shared state between FFT processing and web server
 struct SharedState {
@@ -27,27 +42,37 @@ fn main() -> Result<()> {
 	esp_idf_svc::sys::link_patches();
 	EspLogger::initialize_default();
 
-	// Initialize NVS (fix for WiFi calibration data)
-	let nvs = EspDefaultNvsPartition::take()?;
-
 	info!("FFT Spectrum Analyzer starting...");
 
 	// Take control of the peripherals
 	let peripherals = Peripherals::take()?;
 	let pins = peripherals.pins;
+	let modem = peripherals.modem;
 
+	// Initialize NVS (fix for WiFi calibration data)
+	let nvs = EspDefaultNvsPartition::take()?;
+
+	// Get system event loop
 	let sysloop = EspSystemEventLoop::take()?;
 
 	// Configure and initialize the I2S driver
-	let clock_config = StdClkConfig::from_sample_rate_hz(48000);
-	let slot_config = StdSlotConfig::philips_slot_default(DataBitWidth::Bits32, SlotMode::Mono);
-	let config = StdConfig::new(Config::default(), clock_config, slot_config, StdGpioConfig::default());
+	let clock_config = StdClkConfig::from_sample_rate_hz(SAMPLING_RATE);
+	let slot_config = StdSlotConfig::philips_slot_default(
+		DataBitWidth::Bits32,
+		SlotMode::Mono,
+	);
+	let config = StdConfig::new(
+		Config::default(),
+		clock_config,
+		slot_config,
+		StdGpioConfig::default(),
+	);
 
 	let mut i2s = I2sDriver::new_std_rx(
 		peripherals.i2s0,
 		&config,
-		pins.gpio25,  // sck
-		pins.gpio26,  // sd
+		pins.gpio25, // sck
+		pins.gpio26, // sd
 		None::<AnyIOPin>,
 		pins.gpio27, // ws
 	)?;
@@ -57,197 +82,193 @@ fn main() -> Result<()> {
 
 	// Create FFT planner and Hann window
 	let mut planner = FftPlanner::new();
-	let fft = planner.plan_fft_forward(2048);
+	let fft = planner.plan_fft_forward(FFT_LENGTH);
 
 	// Pre-calculate Hann window for better performance
-	let hann_window: Vec<f32> = (0..2048)
-		.map(|i| 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / 2047.0).cos()))
+	let hann_window: Vec<f32> = (0..FFT_LENGTH)
+		.map(|i| {
+			0.5 * (1.0
+				- (2.0 * std::f32::consts::PI * i as f32 / HANN_WINDOW_LENGHT)
+					.cos())
+		})
 		.collect();
 	info!("hann_window initialized with length: {}", hann_window.len());
 
-	// Set up WiFi in Access Point mode
-	info!("Setting up WiFi Access Point...");
-	let mut wifi = BlockingWifi::wrap(
-		EspWifi::new(peripherals.modem, sysloop.clone(), Some(nvs))?, // Pass NVS to WiFi
-		sysloop,
-	)?;
+	// Create shared state for FFT data with RwLock
+	let shared_state: Arc<RwLock<SharedState>> =
+		Arc::new(RwLock::new(SharedState {
+			magnitudes: vec![0.0; FREQUENCY_MAGNITUDE_LENGHT],
+			dominant_frequency: 0.0,
+		}));
 
-	wifi.set_configuration(&esp_idf_svc::wifi::Configuration::AccessPoint(
-		AccessPointConfiguration {
-			ssid: "ESP32-FFT-Analyzer".try_into().unwrap(),
-			password: "spectrum123".try_into().unwrap(),
-			auth_method: esp_idf_svc::wifi::AuthMethod::WPA2Personal,
-			..Default::default()
-		}
-	))?;
-
-	wifi.start()?;
-	info!("WiFi Access Point started: SSID='ESP32-FFT-Analyzer', Password='spectrum123'");
-
-	// Create shared state for FFT data with mutex
-	let shared_state: Arc<RwLock<SharedState>> = Arc::new(RwLock::new(SharedState {
-		magnitudes: vec![0.0; 1024],
-		dominant_frequency: 0.0,
-	}));
-
-	// Start HTTP server
-	info!("Starting HTTP server...");
+	// Clone state for the Wi-Fi/server thread
 	let server_state = shared_state.clone();
-	let mut server = EspHttpServer::new(&Configuration::default())?;
 
-	// Serve the main HTML page
-	server.fn_handler("/", esp_idf_svc::http::Method::Get, move |request| {
-		let html = include_str!("../index.html");
-		let mut resp = request.into_ok_response()?;
-		resp.write(html.as_bytes())?;
-		Ok::<(), EspIOError>(())
-	})?;
+	let wifi_builder = thread::Builder::new()
+		.stack_size(8192)
+		.name("wifi_server".into());
 
-	// API endpoint to get FFT data as JSON
-	server.fn_handler("/api/fft", esp_idf_svc::http::Method::Get, move |request| {
-		let state = match server_state.read() {
-			Ok(state) => state,
-			Err(_) => {
-				// Handle lock error gracefully
-				let mut resp = request.into_response(500, Some("Internal Server Error"), &[])?;
-				resp.write(b"Internal server error")?;
-				return Ok(());
-			}
-		};
+	// Start Wi-Fi and HTTP server on a separate thread
+	wifi_builder
+		.spawn(move || {
+			info!("Setting up WiFi Access Point...");
+			let mut wifi = BlockingWifi::wrap(
+				EspWifi::new(modem, sysloop.clone(), Some(nvs)).unwrap(),
+				sysloop,
+			)
+			.expect("Failed to initialize WiFi");
 
-		// Create JSON string from the FFT data
-		let mut json = String::from("{\"magnitudes\":[");
-		for (i, &mag) in state.magnitudes.iter().enumerate() {
-			if i > 0 {
-				json.push_str(",");
-			}
-			json.push_str(&format!("{:.6}", mag));
-		}
-		json.push_str("],\"dominantFrequency\":");
-		json.push_str(&format!("{:.2}", state.dominant_frequency));
-		json.push_str("}");
+			wifi.set_configuration(&esp_idf_svc::wifi::Configuration::AccessPoint(
+				AccessPointConfiguration {
+					ssid: "ESP32-FFT-Analyzer".try_into().unwrap(),
+					password: "spectrum123".try_into().unwrap(),
+					auth_method: esp_idf_svc::wifi::AuthMethod::WPA2Personal,
+					..Default::default()
+				},
+			))
+			.expect("Failed to set WiFi configuration");
 
-		let mut resp = request.into_ok_response()?;
-		resp.write(json.as_bytes())?;
-		Ok::<(), EspIOError>(())
-	})?;
+			wifi.start().expect("Failed to start WiFi");
+			info!("WiFi Access Point started: SSID='ESP32-FFT-Analyzer', Password='spectrum123'");
 
-	info!("HTTP server started - Connect to http://192.168.71.1");
+			// Start HTTP server
+			info!("Starting HTTP server...");
+			let mut server = EspHttpServer::new(&Configuration::default())
+				.expect("Failed to create HTTP server");
 
-	// Create a safe copy of I2S driver for the task
-	let i2s_mutex = Arc::new(Mutex::new(i2s));
-	let i2s_for_task = i2s_mutex.clone();
+			// Serve the main HTML page
+			server
+				.fn_handler("/", esp_idf_svc::http::Method::Get, move |request| {
+					let html = include_str!("../index.html");
+					let mut resp = request.into_ok_response()?;
+					resp.write(html.as_bytes())?;
+					Ok::<(), EspIOError>(())
+				})
+				.expect("Failed to register index handler");
 
-	// Start FFT processing task using ESP-IDF's native task system
-	let fft_state = shared_state.clone();
-	let fft_arc = Arc::new(fft);  // Make FFT shareable across tasks
-	let hann_window_arc = Arc::new(hann_window);
-
-	let builder = thread::Builder::new().stack_size(16384); // 16 KB
-	builder.spawn(move || {
-		let mut buffer: Vec<u8> = vec![0; 1024];
-		let mut accumulated_buffer: Vec<u8> = vec![0; 8192];
-		let mut acc_index = 0;
-		let timeout = 100;
-
-		info!("FFT task started"); // Confirm task begins
-
-		loop {
-			let mut i2s = match i2s_for_task.lock() {
-				Ok(i2s) => i2s,
-				Err(e) => {
-					error!("Failed to lock I2S driver: {:?}", e);
-					FreeRtos::delay_ms(100);
-					continue;
-				}
-			};
-			info!("I2S driver locked, attempting read...");
-
-			while acc_index < 8192 {
-				match i2s.read(&mut buffer, timeout) {
-					Ok(bytes_read) => {
-						let space_left = 8192 - acc_index;
-						let bytes_to_copy = bytes_read.min(space_left);
-						for i in 0..bytes_to_copy {
-							accumulated_buffer[acc_index + i] = buffer[i];
+			// API endpoint to get FFT data as JSON
+			let api_state = server_state.clone();
+			server
+				.fn_handler("/api/fft", esp_idf_svc::http::Method::Get, move |request| {
+					let state = match api_state.read() {
+						Ok(state) => state,
+						Err(_) => {
+							// Handle lock error gracefully
+							let mut resp =
+								request.into_response(500, Some("Internal Server Error"), &[])?;
+							resp.write(b"Internal server error")?;
+							return Ok(());
 						}
-						acc_index += bytes_to_copy;
-					}
-					Err(e) => {
-						error!("I2S read error: {:?}", e);
-						break;
-					}
-				}
-				FreeRtos::delay_ms(1);
-			}
+					};
 
-			drop(i2s);
-
-			if acc_index >= 8192 {
-				let mut samples: Vec<Complex<f32>>  = vec![Complex::<f32>::new(0.0, 0.0); 2048];
-				let hann_window = &hann_window_arc;
-
-				// Add length check before accessing hann_window
-				if hann_window.len() != 2048 {
-					error!("hann_window length is {}, expected 1024", hann_window.len());
-					acc_index = 0; // Reset and retry
-					continue;
-				}
-
-				info!("Processing FFT with hann_window length: {}", hann_window.len());
-
-				for i in 0..2048 {
-					let offset = i * 4;
-					let val = i32::from_le_bytes([
-						accumulated_buffer[offset],
-						accumulated_buffer[offset + 1],
-						accumulated_buffer[offset + 2],
-						accumulated_buffer[offset + 3],
-					]);
-					let sample_f32 = (val as f32) / 2147483648.0 * hann_window[i];
-					samples[i] = Complex::new(sample_f32, 0.0);
-				}
-
-				let fft = &fft_arc;
-				fft.process(&mut samples);
-
-				let scale_factor: f32 = 1.0 / 2048.0;
-				let mut magnitudes: Vec<f32> = vec![0.0; 1024];
-				let mut max_mag: f32 = 0.0;
-				let mut max_index = 0;
-
-				for i in 0..1024 {
-					magnitudes[i] = samples[i].norm() * scale_factor;
-					if magnitudes[i] > max_mag {
-						max_mag = magnitudes[i];
-						max_index = i;
-					}
-				}
-
-				let frequency: f32 = max_index as f32 * (48000.0 / 2048.0);
-
-				match fft_state.write() {
-					Ok(mut state) => {
-						for i in 0..1024 {
-							state.magnitudes[i] = magnitudes[i];
+					// Create JSON string from the FFT data
+					let mut json = String::from("{\"magnitudes\":[");
+					for (i, &mag) in state.magnitudes.iter().enumerate() {
+						if i > 0 {
+							json.push(',');
 						}
-						state.dominant_frequency = frequency;
-						info!("Updated FFT data, dominant frequency: {:.2} Hz", frequency);
+						json.push_str(&format!("{:.6}", mag));
 					}
-					Err(e) => {
-						error!("Failed to update FFT data: {:?}", e);
-					}
-				}
+					json.push_str("],\"dominantFrequency\":");
+					json.push_str(&format!("{:.2}", state.dominant_frequency));
+					json.push('}');
 
-				acc_index = 0;
+					let mut resp = request.into_ok_response()?;
+					resp.write(json.as_bytes())?;
+					Ok::<(), EspIOError>(())
+				})
+				.expect("Failed to register API handler");
+
+			info!("HTTP server started - Connect to http://192.168.71.1");
+
+			// Keep this thread alive
+			loop {
+				FreeRtos::delay_ms(1000);
 			}
+		})
+		.expect("Failed to spawn WiFi/server thread!");
 
-			// FreeRtos::delay_ms(10);
-		}
-	}).expect("Failed to spawn ftt thread!!!");
+	let mut buffer: Vec<u8> = vec![0; FREQUENCY_MAGNITUDE_LENGHT];
+	let mut accumulated_buffer: Vec<u8> = vec![0; FFT_LENGTH_BYTES];
+	let mut acc_index = 0;
+	let timeout = 100;
 
-	// Keep the main task alive
+	// Main FFT loop
 	loop {
-		FreeRtos::delay_ms(100);
+		while acc_index < FFT_LENGTH_BYTES {
+			match i2s.read(&mut buffer, timeout) {
+				Ok(bytes_read) => {
+					let space_left = FFT_LENGTH_BYTES - acc_index;
+					let bytes_to_copy = bytes_read.min(space_left);
+					accumulated_buffer[acc_index..acc_index + bytes_to_copy]
+						.copy_from_slice(&buffer[..bytes_to_copy]);
+					acc_index += bytes_to_copy;
+				}
+				Err(e) => {
+					error!("I2S read error: {:?}", e);
+					break;
+				}
+			}
+			FreeRtos::delay_ms(1);
+		}
+
+		if acc_index >= FFT_LENGTH_BYTES {
+			// Process accumulated buffer for FFT
+			let mut samples: Vec<Complex<f32>> =
+				vec![Complex::<f32>::new(0.0, 0.0); FFT_LENGTH];
+
+			// Apply Hann window and prepare samples
+			for i in 0..FFT_LENGTH {
+				let offset = i * 4;
+				let val = i32::from_le_bytes([
+					accumulated_buffer[offset],
+					accumulated_buffer[offset + 1],
+					accumulated_buffer[offset + 2],
+					accumulated_buffer[offset + 3],
+				]);
+				let sample_f32 = (val as f32) / 2147483648.0 * hann_window[i];
+				samples[i] = Complex::new(sample_f32, 0.0);
+			}
+
+			// Perform FFT
+			fft.process(&mut samples);
+
+			// Calculate magnitudes and find dominant frequency
+			let scale_factor: f32 = 1.0 / FFT_LENGTH as f32;
+			let mut magnitudes: Vec<f32> =
+				vec![0.0; FREQUENCY_MAGNITUDE_LENGHT];
+			let mut max_mag: f32 = 0.0;
+			let mut max_index = 0;
+
+			for i in 0..FREQUENCY_MAGNITUDE_LENGHT {
+				magnitudes[i] = samples[i].norm() * scale_factor;
+				if magnitudes[i] > max_mag {
+					max_mag = magnitudes[i];
+					max_index = i;
+				}
+			}
+
+			let frequency: f32 =
+				max_index as f32 * (SAMPLING_RATE as f32 / FFT_LENGTH as f32);
+
+			// Update shared state with new FFT data
+			match shared_state.write() {
+				Ok(mut state) => {
+					state.magnitudes.copy_from_slice(
+						&magnitudes[..FREQUENCY_MAGNITUDE_LENGHT],
+					);
+					state.dominant_frequency = frequency;
+					info!(
+						"Updated FFT data, dominant frequency: {:.2} Hz",
+						frequency
+					);
+				}
+				Err(e) => {
+					error!("Failed to update FFT data: {:?}", e);
+				}
+			}
+
+			acc_index = 0;
+		}
 	}
 }

@@ -29,7 +29,6 @@ anyhow = "1.0.97"
 esp-idf-hal = {version = "0.45.2", features = []}
 rustfft = "6.2.0"
 #tokio = { version = "1.0.0", features = ["rt", "rt-multi-thread", "macros", "time"] }
-#heapless = "0.8.0"
 #time = "0.3.40"
 
 [build-dependencies]

@@ -1,3 +1,5 @@
+
+
 pub const SAMPLING_RATE: u32 = 48000; // Audio Sampling Rate in Hertz
 
 /// Represents the number of samples that will be processed in a single FFT operation.
@@ -13,3 +15,7 @@ pub const HANN_WINDOW_LENGHT: f32 = (FFT_LENGTH - 1) as f32;
 pub const FREQUENCY_MAGNITUDE_LENGHT: usize = FFT_LENGTH / 2;
 
 pub const FFT_LENGTH_BYTES: usize = FFT_LENGTH * 4;
+
+pub static WIFI_SSID: &str = "ESP32-FFT-Analyzer";
+
+pub const WIFI_PASSWORD: &str = "spectrum123";

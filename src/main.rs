@@ -1,4 +1,5 @@
 mod constants;
+mod web_server;
 
 use anyhow::Result;
 use constants::*;
@@ -14,25 +15,14 @@ use esp_idf_hal::{
 	},
 	peripherals::Peripherals,
 };
-use esp_idf_svc::{
-	eventloop::EspSystemEventLoop,
-	http::server::{Configuration, EspHttpServer},
-	io::EspIOError,
-	log::EspLogger,
-	nvs::EspDefaultNvsPartition,
-	wifi::AccessPointConfiguration,
-	wifi::{BlockingWifi, EspWifi},
-};
+use esp_idf_svc::log::EspLogger;
 use log::{error, info};
 use rustfft::{num_complex::Complex, FftPlanner};
-use std::{
-	string::String,
-	sync::{Arc, RwLock},
-	thread,
-};
+use std::sync::{Arc, RwLock};
+use web_server::*;
 
 // Shared state between FFT processing and web server
-struct SharedState {
+struct SystemState {
 	magnitudes: Vec<f32>,
 	dominant_frequency: f32,
 }
@@ -49,11 +39,15 @@ fn main() -> Result<()> {
 	let pins = peripherals.pins;
 	let modem = peripherals.modem;
 
-	// Initialize NVS (fix for WiFi calibration data)
-	let nvs = EspDefaultNvsPartition::take()?;
+	// Create shared state for FFT data with RwLock
+	let shared_state: Arc<RwLock<SystemState>> =
+		Arc::new(RwLock::new(SystemState {
+			magnitudes: vec![0.0; FREQUENCY_MAGNITUDE_LENGHT],
+			dominant_frequency: 0.0,
+		}));
 
-	// Get system event loop
-	let sysloop = EspSystemEventLoop::take()?;
+	// Clone state for the Wi-Fi/server thread
+	let server_state = shared_state.clone();
 
 	// Configure and initialize the I2S driver
 	let clock_config = StdClkConfig::from_sample_rate_hz(SAMPLING_RATE);
@@ -94,98 +88,7 @@ fn main() -> Result<()> {
 		.collect();
 	info!("hann_window initialized with length: {}", hann_window.len());
 
-	// Create shared state for FFT data with RwLock
-	let shared_state: Arc<RwLock<SharedState>> =
-		Arc::new(RwLock::new(SharedState {
-			magnitudes: vec![0.0; FREQUENCY_MAGNITUDE_LENGHT],
-			dominant_frequency: 0.0,
-		}));
-
-	// Clone state for the Wi-Fi/server thread
-	let server_state = shared_state.clone();
-
-	let wifi_builder = thread::Builder::new()
-		.stack_size(8192)
-		.name("wifi_server".into());
-
-	// Start Wi-Fi and HTTP server on a separate thread
-	wifi_builder
-		.spawn(move || {
-			info!("Setting up WiFi Access Point...");
-			let mut wifi = BlockingWifi::wrap(
-				EspWifi::new(modem, sysloop.clone(), Some(nvs)).unwrap(),
-				sysloop,
-			)
-			.expect("Failed to initialize WiFi");
-
-			wifi.set_configuration(&esp_idf_svc::wifi::Configuration::AccessPoint(
-				AccessPointConfiguration {
-					ssid: "ESP32-FFT-Analyzer".try_into().unwrap(),
-					password: "spectrum123".try_into().unwrap(),
-					auth_method: esp_idf_svc::wifi::AuthMethod::WPA2Personal,
-					..Default::default()
-				},
-			))
-			.expect("Failed to set WiFi configuration");
-
-			wifi.start().expect("Failed to start WiFi");
-			info!("WiFi Access Point started: SSID='ESP32-FFT-Analyzer', Password='spectrum123'");
-
-			// Start HTTP server
-			info!("Starting HTTP server...");
-			let mut server = EspHttpServer::new(&Configuration::default())
-				.expect("Failed to create HTTP server");
-
-			// Serve the main HTML page
-			server
-				.fn_handler("/", esp_idf_svc::http::Method::Get, move |request| {
-					let html = include_str!("../index.html");
-					let mut resp = request.into_ok_response()?;
-					resp.write(html.as_bytes())?;
-					Ok::<(), EspIOError>(())
-				})
-				.expect("Failed to register index handler");
-
-			// API endpoint to get FFT data as JSON
-			let api_state = server_state.clone();
-			server
-				.fn_handler("/api/fft", esp_idf_svc::http::Method::Get, move |request| {
-					let state = match api_state.read() {
-						Ok(state) => state,
-						Err(_) => {
-							// Handle lock error gracefully
-							let mut resp =
-								request.into_response(500, Some("Internal Server Error"), &[])?;
-							resp.write(b"Internal server error")?;
-							return Ok(());
-						}
-					};
-
-					// Create JSON string from the FFT data
-					let mut json = String::from("{\"magnitudes\":[");
-					for (i, &mag) in state.magnitudes.iter().enumerate() {
-						if i > 0 {
-							json.push(',');
-						}
-						json.push_str(&format!("{:.6}", mag));
-					}
-					json.push_str("],\"dominantFrequency\":");
-					json.push_str(&format!("{:.2}", state.dominant_frequency));
-					json.push('}');
-
-					let mut resp = request.into_ok_response()?;
-					resp.write(json.as_bytes())?;
-					Ok::<(), EspIOError>(())
-				})
-				.expect("Failed to register API handler");
-
-			info!("HTTP server started - Connect to http://192.168.71.1");
-
-			// Keep this thread alive
-			loop {
-				FreeRtos::delay_ms(1000);
-			}
-		})
+	spawn_wifi_thread(modem, server_state)
 		.expect("Failed to spawn WiFi/server thread!");
 
 	let mut buffer: Vec<u8> = vec![0; FREQUENCY_MAGNITUDE_LENGHT];

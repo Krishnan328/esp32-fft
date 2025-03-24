@@ -13,7 +13,7 @@ use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use log::{info, error};
 use rustfft::{num_complex::Complex, FftPlanner};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 
 // Shared state between FFT processing and web server
@@ -39,8 +39,8 @@ fn main() -> Result<()> {
 	let sysloop = EspSystemEventLoop::take()?;
 
 	// Configure and initialize the I2S driver
-	let clock_config = StdClkConfig::from_sample_rate_hz(44100);
-	let slot_config = StdSlotConfig::philips_slot_default(DataBitWidth::Bits16, SlotMode::Mono);
+	let clock_config = StdClkConfig::from_sample_rate_hz(48000);
+	let slot_config = StdSlotConfig::philips_slot_default(DataBitWidth::Bits32, SlotMode::Mono);
 	let config = StdConfig::new(Config::default(), clock_config, slot_config, StdGpioConfig::default());
 
 	let mut i2s = I2sDriver::new_std_rx(
@@ -57,10 +57,12 @@ fn main() -> Result<()> {
 
 	// Create FFT planner and Hann window
 	let mut planner = FftPlanner::new();
-	let fft = planner.plan_fft_forward(1024);
+	let fft = planner.plan_fft_forward(2048);
 
 	// Pre-calculate Hann window for better performance
-	let hann_window: [f32; 1024] = core::array::from_fn(|i| 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / 1023.0).cos()));
+	let hann_window: Vec<f32> = (0..2048)
+		.map(|i| 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / 2047.0).cos()))
+		.collect();
 	info!("hann_window initialized with length: {}", hann_window.len());
 
 	// Set up WiFi in Access Point mode
@@ -83,8 +85,8 @@ fn main() -> Result<()> {
 	info!("WiFi Access Point started: SSID='ESP32-FFT-Analyzer', Password='spectrum123'");
 
 	// Create shared state for FFT data with mutex
-	let shared_state = Arc::new(Mutex::new(SharedState {
-		magnitudes: vec![0.0; 512],
+	let shared_state: Arc<RwLock<SharedState>> = Arc::new(RwLock::new(SharedState {
+		magnitudes: vec![0.0; 1024],
 		dominant_frequency: 0.0,
 	}));
 
@@ -103,7 +105,7 @@ fn main() -> Result<()> {
 
 	// API endpoint to get FFT data as JSON
 	server.fn_handler("/api/fft", esp_idf_svc::http::Method::Get, move |request| {
-		let state = match server_state.lock() {
+		let state = match server_state.read() {
 			Ok(state) => state,
 			Err(_) => {
 				// Handle lock error gracefully
@@ -143,8 +145,8 @@ fn main() -> Result<()> {
 
 	let builder = thread::Builder::new().stack_size(16384); // 16 KB
 	builder.spawn(move || {
-		let mut buffer = [0u8; 512];
-		let mut accumulated_buffer = vec![0u8; 4096];
+		let mut buffer: Vec<u8> = vec![0; 1024];
+		let mut accumulated_buffer: Vec<u8> = vec![0; 8192];
 		let mut acc_index = 0;
 		let timeout = 100;
 
@@ -161,10 +163,10 @@ fn main() -> Result<()> {
 			};
 			info!("I2S driver locked, attempting read...");
 
-			while acc_index < 4096 {
+			while acc_index < 8192 {
 				match i2s.read(&mut buffer, timeout) {
 					Ok(bytes_read) => {
-						let space_left = 4096 - acc_index;
+						let space_left = 8192 - acc_index;
 						let bytes_to_copy = bytes_read.min(space_left);
 						for i in 0..bytes_to_copy {
 							accumulated_buffer[acc_index + i] = buffer[i];
@@ -181,12 +183,12 @@ fn main() -> Result<()> {
 
 			drop(i2s);
 
-			if acc_index >= 4096 {
-				let mut samples = vec![Complex::<f32>::new(0.0, 0.0); 1024];
+			if acc_index >= 8192 {
+				let mut samples: Vec<Complex<f32>>  = vec![Complex::<f32>::new(0.0, 0.0); 2048];
 				let hann_window = &hann_window_arc;
 
 				// Add length check before accessing hann_window
-				if hann_window.len() != 1024 {
+				if hann_window.len() != 2048 {
 					error!("hann_window length is {}, expected 1024", hann_window.len());
 					acc_index = 0; // Reset and retry
 					continue;
@@ -194,7 +196,7 @@ fn main() -> Result<()> {
 
 				info!("Processing FFT with hann_window length: {}", hann_window.len());
 
-				for i in 0..1024 {
+				for i in 0..2048 {
 					let offset = i * 4;
 					let val = i32::from_le_bytes([
 						accumulated_buffer[offset],
@@ -209,12 +211,12 @@ fn main() -> Result<()> {
 				let fft = &fft_arc;
 				fft.process(&mut samples);
 
-				let scale_factor = 1.0 / 1024.0;
-				let mut magnitudes = [0.0f32; 512];
-				let mut max_mag = 0.0;
+				let scale_factor: f32 = 1.0 / 2048.0;
+				let mut magnitudes: Vec<f32> = vec![0.0; 1024];
+				let mut max_mag: f32 = 0.0;
 				let mut max_index = 0;
 
-				for i in 0..512 {
+				for i in 0..1024 {
 					magnitudes[i] = samples[i].norm() * scale_factor;
 					if magnitudes[i] > max_mag {
 						max_mag = magnitudes[i];
@@ -222,11 +224,11 @@ fn main() -> Result<()> {
 					}
 				}
 
-				let frequency = max_index as f32 * (44100.0 / 1024.0);
+				let frequency: f32 = max_index as f32 * (48000.0 / 2048.0);
 
-				match fft_state.lock() {
+				match fft_state.write() {
 					Ok(mut state) => {
-						for i in 0..512 {
+						for i in 0..1024 {
 							state.magnitudes[i] = magnitudes[i];
 						}
 						state.dominant_frequency = frequency;

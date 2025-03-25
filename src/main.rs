@@ -38,13 +38,13 @@ fn main() -> Result<()> {
 	let modem = peripherals.modem;
 
 	// Create shared state for FFT data with RwLock
-	let shared_state: Arc<RwLock<SystemState>> = Arc::new(RwLock::new(SystemState {
+	let system_state: Arc<RwLock<SystemState>> = Arc::new(RwLock::new(SystemState {
 		magnitudes: vec![0.0; FREQUENCY_MAGNITUDE_LENGHT],
 		dominant_frequency: 0.0,
 	}));
 
 	// Clone state for the Wi-Fi/server thread
-	let server_state = shared_state.clone();
+	let server_state = system_state.clone();
 
 	// Configure and initialize the I2S driver
 	let clock_config = StdClkConfig::from_sample_rate_hz(SAMPLING_RATE);
@@ -164,7 +164,7 @@ fn main() -> Result<()> {
 			};
 
 			// Update shared state with new FFT data
-			match shared_state.write() {
+			match system_state.write() {
 				Ok(mut state) => {
 					state
 						.magnitudes

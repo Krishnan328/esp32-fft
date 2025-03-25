@@ -1,5 +1,5 @@
 use anyhow::Result;
-use esp_idf_hal::{delay::FreeRtos, modem::Modem};
+use esp_idf_hal::modem::Modem;
 use esp_idf_svc::{
 	eventloop::EspSystemEventLoop,
 	http::server::{Configuration, EspHttpServer},
@@ -13,6 +13,7 @@ use std::{
 	string::String,
 	sync::{Arc, RwLock},
 	thread,
+	time::Duration,
 };
 
 use crate::constants::*;
@@ -118,10 +119,11 @@ pub fn spawn_wifi_thread(modem: Modem, server_state: Arc<RwLock<SystemState>>) -
 		.spawn(move || {
 			let _wifi = init_wifi_ap(modem).expect("Failed to initialise Wi-Fi Access Point.");
 
-			let _server = init_http_server(server_state).expect("Failed to initialise HTTP server.");
+			let _server =
+				init_http_server(server_state).expect("Failed to initialise HTTP server.");
 
 			loop {
-				FreeRtos::delay_ms(1000);
+				thread::sleep(Duration::from_millis(1000));
 			}
 		})
 		.expect("Failed to spawn WiFi/server thread!");

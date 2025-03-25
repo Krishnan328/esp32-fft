@@ -19,7 +19,7 @@ pub const FREQ_BIN_WIDTH: f32 = SAMPLING_RATE as f32 / FFT_LENGTH as f32;
 // Tune this value to remove noise of low amplitude from signal
 pub const AMPLITUDE_THRESHOLD: AmplitudeThreshold = AmplitudeThreshold {
 	frequency_cutoff: 1000.0,   // 1kHz boundary
-	low_freq_threshold: 0.0006, // For <1kHz (keep between 0.001 to 0.0005)
+	low_freq_threshold: 0.0009, // For <1kHz (keep between 0.001 to 0.0005)
 	high_freq_threshold: 0.01,  // For ≥1kHz (keep between 0.05 to 0.005)
 };
 

@@ -16,8 +16,8 @@ use std::{
 	time::Duration,
 };
 
-use crate::constants::*;
 use crate::SystemState;
+use crate::constants::*;
 
 pub fn init_wifi_module() -> Result<(EspDefaultNvsPartition, EspSystemEventLoop)> {
 	let nvs = EspDefaultNvsPartition::take()?;

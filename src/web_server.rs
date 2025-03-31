@@ -10,14 +10,13 @@ use esp_idf_svc::{
 };
 use log::*;
 use std::{
-	string::String,
 	sync::{Arc, RwLock},
 	thread,
 	time::Duration,
 };
 
-use crate::SystemState;
 use crate::constants::*;
+use crate::FFTData;
 
 pub fn init_wifi_module() -> Result<(EspDefaultNvsPartition, EspSystemEventLoop)> {
 	let nvs = EspDefaultNvsPartition::take()?;
@@ -57,7 +56,7 @@ pub fn init_wifi_ap(modem: Modem) -> Result<BlockingWifi<EspWifi<'static>>> {
 	Ok(wifi)
 }
 
-pub fn init_http_server(server_state: Arc<RwLock<SystemState>>) -> Result<EspHttpServer<'static>> {
+pub fn init_http_server(server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<EspHttpServer<'static>> {
 	info!("Starting HTTP server...");
 	let mut server =
 		EspHttpServer::new(&Configuration::default()).expect("Failed to create HTTP server");
@@ -72,36 +71,30 @@ pub fn init_http_server(server_state: Arc<RwLock<SystemState>>) -> Result<EspHtt
 		})
 		.expect("Failed to register index handler");
 
-	// API endpoint to get FFT data as JSON
-	let api_state = server_state.clone();
+	// API endpoint to get FFT data
 	server
 		.fn_handler("/api/fft", esp_idf_svc::http::Method::Get, move |request| {
-			let state = match api_state.read() {
-				Ok(state) => state,
-				Err(_) => {
-					// Handle lock error gracefully
-					let mut resp =
-						request.into_response(500, Some("Internal Server Error"), &[])?;
-					resp.write(b"Internal server error")?;
-					return Ok(());
-				}
+			let current_data = if let Ok(state) = server_state.read() {
+				state.clone()
+			} else {
+				// Handle lock error gracefully
+				let mut resp = request.into_response(500, Some("Internal Server Error"), &[])?;
+				resp.write(b"Internal server error")?;
+				return Ok(());
 			};
 
-			// Create JSON string from the FFT data
-			let mut json = String::with_capacity(12000);
-			json.push_str("{\"magnitudes\":[");
-			for (i, &mag) in state.magnitudes.iter().enumerate() {
-				if i > 0 {
-					json.push(',');
-				}
-				json.push_str(&format!("{:.6}", mag));
-			}
-			json.push_str("],\"dominantFrequency\":");
-			json.push_str(&format!("{:.2}", state.dominant_frequency));
-			json.push('}');
-
 			let mut resp = request.into_ok_response()?;
-			resp.write(json.as_bytes())?;
+			let magnitudes_bytes: &[u8] = unsafe {
+				std::slice::from_raw_parts(
+					current_data.magnitudes.as_ptr() as *const u8,
+					current_data.magnitudes.len() * std::mem::size_of::<f32>(),
+				)
+			};
+			// Write dominant frequency as binary data
+			let dominant_freq_bytes = current_data.dominant_frequency.to_le_bytes();
+
+			resp.write(magnitudes_bytes)?;
+			resp.write(&dominant_freq_bytes)?;
 			Ok::<(), EspIOError>(())
 		})
 		.expect("Failed to register API handler");
@@ -110,7 +103,7 @@ pub fn init_http_server(server_state: Arc<RwLock<SystemState>>) -> Result<EspHtt
 	Ok(server)
 }
 
-pub fn spawn_wifi_thread(modem: Modem, server_state: Arc<RwLock<SystemState>>) -> Result<()> {
+pub fn spawn_wifi_thread(modem: Modem, server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<()> {
 	let wifi_thread_builder = thread::Builder::new()
 		.stack_size(8192)
 		.name("Wi-Fi Server".into());

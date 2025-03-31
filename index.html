@@ -82,7 +82,8 @@
 
     // Variables to adjust the audio sampling rate and FFT Bin size
     const SAMPLING_RATE = 48000;  // Change this value in constants.rs too!
-    const FFT_LENGTH = 1024;      // Change this value in constants.rs too!
+    const FFT_LENGTH = 2048;      // Change this value in constants.rs too!
+    const FREQUENCY_MAGNITUDE_LENGHT = FFT_LENGTH / 2;  // Change this value in constants.rs too!
 
     // Audio frequency range
     const minFreq = 20;    // 20 Hz
@@ -214,15 +215,25 @@
     // Function to fetch FFT data
     async function fetchFFTData() {
         try {
+            // Fetch the binary data from the /api/fft endpoint
             const response = await fetch('/api/fft');
-            const data = await response.json();
-            updateSpectrum(data.magnitudes, data.dominantFrequency);
+            const arrayBuffer = await response.arrayBuffer();
+            
+            // Convert the ArrayBuffer to a Float32Array
+            const floatArray = new Float32Array(arrayBuffer);
+            
+            // Extract magnitudes and dominant frequency
+            const magnitudes = floatArray.slice(0, FREQUENCY_MAGNITUDE_LENGHT);
+            const dominantFrequency = floatArray[FREQUENCY_MAGNITUDE_LENGHT];
+            
+            // Update the spectrum visualization
+            updateSpectrum(magnitudes, dominantFrequency);
         } catch (error) {
             console.error('Error fetching FFT data:', error);
         }
-
-        // Schedule next update
-        setTimeout(fetchFFTData, 21.33);
+        
+        // Schedule the next fetch (adjust timing for desired fps, e.g., 33.33ms ~ 30 fps)
+        setTimeout(fetchFFTData, 33.33);
     }
 
     // Start fetching data

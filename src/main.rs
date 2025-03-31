@@ -20,8 +20,9 @@ use std::sync::{Arc, RwLock};
 use web_server::*;
 
 // Shared state between FFT processing and web server
-struct SystemState {
-	magnitudes: Vec<f32>,
+
+struct FFTData {
+	magnitudes: [f32; FREQUENCY_MAGNITUDE_LENGHT],
 	dominant_frequency: f32,
 }
 
@@ -38,10 +39,15 @@ fn main() -> Result<()> {
 	let modem = peripherals.modem;
 
 	// Create shared state for FFT data with RwLock
-	let system_state: Arc<RwLock<SystemState>> = Arc::new(RwLock::new(SystemState {
-		magnitudes: vec![0.0; FREQUENCY_MAGNITUDE_LENGHT],
+	// let system_state: Arc<RwLock<SystemState>> = Arc::new(RwLock::new(SystemState {
+	// 	magnitudes: vec![0.0; FREQUENCY_MAGNITUDE_LENGHT],
+	// 	dominant_frequency: 0.0,
+	// }));
+
+	let system_state: Arc<RwLock<Arc<FFTData>>> = Arc::new(RwLock::new(Arc::new(FFTData {
+		magnitudes: [0.0; FREQUENCY_MAGNITUDE_LENGHT],
 		dominant_frequency: 0.0,
-	}));
+	})));
 
 	// Clone state for the Wi-Fi/server thread
 	let server_state = system_state.clone();
@@ -125,7 +131,8 @@ fn main() -> Result<()> {
 
 			// Calculate magnitudes and find dominant frequency
 			let scale_factor: f32 = 1.0 / FFT_LENGTH as f32;
-			let mut magnitudes: Vec<f32> = vec![0.0; FREQUENCY_MAGNITUDE_LENGHT];
+			let mut magnitudes: [f32; FREQUENCY_MAGNITUDE_LENGHT] =
+				[0.0; FREQUENCY_MAGNITUDE_LENGHT];
 			let mut max_mag: f32 = 0.0;
 			let mut max_index = 0;
 
@@ -163,19 +170,16 @@ fn main() -> Result<()> {
 				0.0
 			};
 
+			let updated_fft_data: Arc<FFTData> = Arc::new(FFTData {
+				magnitudes,
+				dominant_frequency: frequency,
+			});
+
+			// info!("Updated FFT data, dominant frequency: {:.2} Hz", frequency); // Uncomment to print dominant freq. to console
+			// info!("Updated FFT data, magnitudes: {:?}", &state.magnitudes); // Uncomment to print all magnitudes
+
 			// Update shared state with new FFT data
-			match system_state.write() {
-				Ok(mut state) => {
-					state
-						.magnitudes
-						.copy_from_slice(&magnitudes[..FREQUENCY_MAGNITUDE_LENGHT]);
-					state.dominant_frequency = frequency;
-					info!("Updated FFT data, dominant frequency: {:.2} Hz", frequency);
-				}
-				Err(e) => {
-					error!("Failed to update FFT data: {:?}", e);
-				}
-			}
+			*system_state.write().unwrap() = updated_fft_data;
 
 			acc_index = 0;
 		}

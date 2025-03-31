@@ -2,185 +2,240 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>FFT-Based Audio Processing on ESP32 Documentation</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ESP32 FFT Spectrum Analyzer Documentation</title>
   <style>
     body {
       font-family: Arial, sans-serif;
-      margin: 2em;
       line-height: 1.6;
-      background-color: #f4f4f4;
+      margin: 20px;
+      background-color: #f9f9f9;
       color: #333;
-    }
-    header, section {
-      background: #fff;
-      padding: 1em 2em;
-      margin-bottom: 1.5em;
-      border-radius: 5px;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
     }
     h1, h2, h3 {
       color: #2c3e50;
     }
-    code {
-      background-color: #eaeaea;
-      padding: 0.2em 0.4em;
-      border-radius: 3px;
-      font-family: "Courier New", Courier, monospace;
+    h1 {
+      border-bottom: 2px solid #3498db;
+      padding-bottom: 10px;
+    }
+    h2 {
+      margin-top: 30px;
+      color: #2980b9;
     }
     pre {
-      background-color: #eaeaea;
-      padding: 1em;
+      background-color: #ecf0f1;
+      padding: 15px;
       border-radius: 5px;
       overflow-x: auto;
+      font-size: 14px;
     }
-    .note {
-      background: #ffffe0;
-      padding: 0.5em;
-      border-left: 4px solid #ffeb3b;
-      margin: 1em 0;
+    code {
+      font-family: Consolas, monospace;
+      background-color: #ecf0f1;
+      padding: 2px 5px;
+      border-radius: 3px;
+    }
+    ul, ol {
+      margin-left: 20px;
+    }
+    li {
+      margin-bottom: 10px;
+    }
+    .section {
+      background-color: #fff;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
     }
   </style>
 </head>
 <body>
-  <header>
-    <h1>FFT-Based Audio Processing on ESP32</h1>
-    <p>This documentation explains the code that configures an ESP32 I2S peripheral to capture audio from an INMP441 microphone, performs a Fast Fourier Transform (FFT) on the captured samples, and logs the dominant frequency.</p>
-  </header>
+<h1>ESP32 FFT Spectrum Analyzer Documentation</h1>
 
-  <section>
-    <h2>Overview</h2>
-    <p>The code uses the ESP-IDF Hardware Abstraction Layer (HAL) and services along with the Rust FFT library (<code>rustfft</code>) to capture and analyze audio. The program continuously reads audio data, converts it to normalized floating-point samples, computes the FFT, and determines the dominant frequency from the captured audio.</p>
-  </section>
+<div class="section">
+  <h2>Description</h2>
+  <p>This Rust program runs on an ESP32 microcontroller and implements a Fast Fourier Transform (FFT) spectrum analyzer with a web interface. It captures audio data through the I2S peripheral, processes it using FFT to compute frequency magnitudes and identify the dominant frequency, and serves this data over a WiFi access point via an HTTP server. Users can connect to the access point and view real-time spectrum analysis in a web browser.</p>
+  <p><strong>Key Features:</strong></p>
+  <ul>
+    <li>Configures WiFi in Access Point mode with SSID "ESP32-FFT-Analyzer" and password "spectrum123".</li>
+    <li>Uses I2S to capture audio input at 44.1 kHz, 32-bit, mono.</li>
+    <li>Performs a 1024-point FFT with a Hann window for spectral analysis.</li>
+    <li>Serves an HTML page at "/" and FFT data as JSON at "/api/fft".</li>
+    <li>Employs multi-threading to handle FFT processing and web serving concurrently.</li>
+  </ul>
+</div>
 
-  <section>
-    <h2>Key Components</h2>
-    <ul>
-      <li><strong>esp_idf_hal::peripherals::Peripherals</strong> – Initializes the ESP32 hardware peripherals.</li>
-      <li><strong>esp_idf_hal::i2s::I2sDriver</strong> – Manages the I2S interface for audio input.</li>
-      <li><strong>esp_idf_hal::i2s::config::{DataBitWidth, StdConfig}</strong> – Provides configuration for the I2S driver (sample rate, bit width, etc.).</li>
-      <li><strong>esp_idf_hal::gpio</strong> – Manages the GPIO pins for I2S signals.</li>
-      <li><strong>esp_idf_svc::log::EspLogger</strong> – Sets up logging for debugging and information purposes.</li>
-      <li><strong>rustfft::{FftPlanner, num_complex::Complex}</strong> – Used to perform the FFT on the audio data.</li>
-      <li><strong>anyhow::Result</strong> – Provides error handling using the <code>anyhow</code> crate.</li>
-    </ul>
-  </section>
+<div class="section">
+  <h2>Code Explanation</h2>
+  <p>The code is organized into logical sections. Below is a detailed explanation of each part:</p>
+  <ol>
+    <li><strong>Imports</strong>
+      <ul>
+        <li><code>use std::string::String;</code> - Imports the String type for dynamic string handling.</li>
+        <li><code>use anyhow::Result;</code> - Provides a Result type for error handling.</li>
+        <li><code>use esp_idf_hal::delay::FreeRtos;</code> - Imports FreeRTOS delay functions for task scheduling.</li>
+        <li><code>use esp_idf_hal::gpio::*;</code> - Imports GPIO functionality for pin control.</li>
+        <li><code>use esp_idf_hal::i2s::{...};</code> - Imports I2S driver and configuration structs for audio input.</li>
+        <li><code>use esp_idf_hal::peripherals::Peripherals;</code> - Provides access to ESP32 peripherals.</li>
+        <li><code>use esp_idf_svc::log::EspLogger;</code> - Imports the ESP-IDF logger for logging messages.</li>
+        <li><code>use esp_idf_svc::wifi::{...};</code> - Imports WiFi functionality for access point setup.</li>
+        <li><code>use esp_idf_svc::http::server::{...};</code> - Imports HTTP server components.</li>
+        <li><code>use esp_idf_svc::io::EspIOError;</code> - Defines I/O error type for HTTP responses.</li>
+        <li><code>use esp_idf_svc::eventloop::EspSystemEventLoop;</code> - Imports system event loop for WiFi.</li>
+        <li><code>use esp_idf_svc::nvs::EspDefaultNvsPartition;</code> - Provides Non-Volatile Storage access.</li>
+        <li><code>use log::{info, error};</code> - Imports logging macros for info and error messages.</li>
+        <li><code>use rustfft::{num_complex::Complex, FftPlanner};</code> - Imports FFT computation tools.</li>
+        <li><code>use std::sync::{Arc, Mutex};</code> - Imports synchronization primitives for thread safety.</li>
+        <li><code>use std::thread;</code> - Imports threading functionality.</li>
+      </ul>
+    </li>
+    <li><strong>Shared State Definition</strong>
+      <ul>
+        <li><code>struct SharedState { magnitudes: Vec<f32>, dominant_frequency: f32 }</code> - Defines a struct to hold FFT magnitudes (512 bins) and the dominant frequency, shared between threads.</li>
+      </ul>
+    </li>
+    <li><strong>Main Function - Initialization</strong>
+      <ul>
+        <li><code>fn main() -> Result<()> {</code> - Starts the main function, returning a Result for error handling.</li>
+        <li><code>esp_idf_svc::sys::link_patches();</code> - Links ESP-IDF patches for system compatibility.</li>
+        <li><code>EspLogger::initialize_default();</code> - Initializes the default logger.</li>
+        <li><code>let nvs = EspDefaultNvsPartition::take()?;</code> - Takes ownership of NVS partition for WiFi calibration.</li>
+        <li><code>info!("FFT Spectrum Analyzer starting...");</code> - Logs the program start.</li>
+        <li><code>let peripherals = Peripherals::take()?;</code> - Takes ownership of ESP32 peripherals.</li>
+        <li><code>let pins = peripherals.pins;</code> - Extracts GPIO pins from peripherals.</li>
+        <li><code>let sysloop = EspSystemEventLoop::take()?;</code> - Initializes the system event loop for WiFi.</li>
+      </ul>
+    </li>
+    <li><strong>I2S Configuration</strong>
+      <ul>
+        <li><code>let clock_config = StdClkConfig::from_sample_rate_hz(44100);</code> - Sets I2S clock to 44.1 kHz.</li>
+        <li><code>let slot_config = StdSlotConfig::philips_slot_default(DataBitWidth::Bits32, SlotMode::Mono);</code> - Configures I2S for 32-bit mono Philips format.</li>
+        <li><code>let config = StdConfig::new(...);</code> - Creates I2S configuration with default settings.</li>
+        <li><code>let mut i2s = I2sDriver::new_std_rx(...)?;</code> - Initializes I2S receiver with GPIO pins 25, 26, and 27.</li>
+        <li><code>i2s.rx_enable()?;</code> - Enables the I2S receiver.</li>
+      </ul>
+    </li>
+    <li><strong>FFT Setup</strong>
+      <ul>
+        <li><code>let mut planner = FftPlanner::new();</code> - Creates an FFT planner.</li>
+        <li><code>let fft = planner.plan_fft_forward(1024);</code> - Plans a 1024-point forward FFT.</li>
+        <li><code>let hann_window: [f32; 1024] = core::array::from_fn(...);</code> - Pre-calculates a 1024-point Hann window.</li>
+        <li><code>info!("hann_window initialized with length: {}", ...);</code> - Logs the Hann window initialization.</li>
+      </ul>
+    </li>
+    <li><strong>WiFi Setup</strong>
+      <ul>
+        <li><code>let mut wifi = BlockingWifi::wrap(...)?;</code> - Initializes a blocking WiFi instance.</li>
+        <li><code>wifi.set_configuration(&esp_idf_svc::wifi::Configuration::AccessPoint(...));</code> - Configures WiFi as an access point with SSID and password.</li>
+        <li><code>wifi.start()?;</code> - Starts the WiFi access point.</li>
+        <li><code>info!("WiFi Access Point started: ...");</code> - Logs WiFi startup details.</li>
+      </ul>
+    </li>
+    <li><strong>Shared State Initialization</strong>
+      <ul>
+        <li><code>let shared_state = Arc::new(Mutex::new(SharedState { ... }));</code> - Creates a thread-safe shared state with initial zeroed magnitudes and frequency.</li>
+      </ul>
+    </li>
+    <li><strong>HTTP Server Setup</strong>
+      <ul>
+        <li><code>let mut server = EspHttpServer::new(&Configuration::default())?;</code> - Initializes the HTTP server.</li>
+        <li><code>server.fn_handler("/", ..., move |request| { ... });</code> - Defines a handler for "/" to serve an HTML page from <code>index.html</code>.</li>
+        <li><code>server.fn_handler("/api/fft", ..., move |request| { ... });</code> - Defines a handler for "/api/fft" to serve FFT data as JSON, handling mutex lock errors gracefully.</li>
+        <li><code>info!("HTTP server started - Connect to ...");</code> - Logs the server startup.</li>
+      </ul>
+    </li>
+    <li><strong>FFT Processing Task Setup</strong>
+      <ul>
+        <li><code>let i2s_mutex = Arc::new(Mutex::new(i2s));</code> - Wraps I2S driver in a mutex for thread safety.</li>
+        <li><code>let fft_state = shared_state.clone();</code> - Clones shared state for the task.</li>
+        <li><code>let fft_arc = Arc::new(fft);</code> - Makes FFT shareable.</li>
+        <li><code>let hann_window_arc = Arc::new(hann_window);</code> - Makes Hann window shareable.</li>
+        <li><code>let builder = thread::Builder::new().stack_size(16384);</code> - Creates a thread builder with 16 KB stack.</li>
+        <li><code>builder.spawn(move || { ... }).expect(...);</code> - Spawns the FFT task, panicking on failure.</li>
+      </ul>
+    </li>
+    <li><strong>FFT Processing Task Logic</strong>
+      <ul>
+        <li><code>let mut buffer = [0u8; 512];</code> - Allocates a 512-byte buffer for I2S reads.</li>
+        <li><code>let mut accumulated_buffer = vec![0u8; 4096];</code> - Allocates a 4096-byte buffer for 1024 samples.</li>
+        <li><code>let mut acc_index = 0;</code> - Tracks accumulated bytes.</li>
+        <li><code>let timeout = 100;</code> - Sets a 100ms timeout for I2S reads.</li>
+        <li><code>info!("FFT task started");</code> - Logs task start.</li>
+        <li><code>loop { ... }</code> - Enters an infinite loop for continuous processing.</li>
+        <li><code>let mut i2s = match i2s_for_task.lock() { ... };</code> - Locks the I2S driver, handling errors.</li>
+        <li><code>while acc_index < 4096 { ... }</code> - Reads I2S data until 4096 bytes are accumulated.</li>
+        <li><code>match i2s.read(&mut buffer, timeout) { ... }</code> - Reads I2S data into the buffer.</li>
+        <li><code>drop(i2s);</code> - Releases the I2S lock.</li>
+        <li><code>if acc_index >= 4096 { ... }</code> - Processes data when enough is accumulated.</li>
+        <li><code>let mut samples = vec![Complex::<f32>::new(0.0, 0.0); 1024];</code> - Creates a vector for 1024 complex samples.</li>
+        <li><code>if hann_window.len() != 1024 { ... }</code> - Checks Hann window length, resetting if incorrect.</li>
+        <li><code>for i in 0..1024 { ... }</code> - Converts raw bytes to float samples with Hann windowing.</li>
+        <li><code>fft.process(&mut samples);</code> - Performs FFT on the samples.</li>
+        <li><code>let scale_factor = 1.0 / 1024.0;</code> - Defines a scaling factor for magnitudes.</li>
+        <li><code>let mut magnitudes = [0.0f32; 512];</code> - Allocates array for 512 magnitude bins.</li>
+        <li><code>for i in 0..512 { ... }</code> - Computes magnitudes and finds the maximum.</li>
+        <li><code>let frequency = max_index as f32 * (44100.0 / 1024.0);</code> - Calculates dominant frequency.</li>
+        <li><code>match fft_state.lock() { ... }</code> - Updates shared state with new FFT data.</li>
+        <li><code>acc_index = 0;</code> - Resets accumulation index.</li>
+        <li><code>FreeRtos::delay_ms(100);</code> - Delays 100ms before the next iteration.</li>
+      </ul>
+    </li>
+    <li><strong>Main Loop</strong>
+      <ul>
+        <li><code>loop { FreeRtos::delay_ms(1000); }</code> - Keeps the main task alive with a 1-second delay.</li>
+      </ul>
+    </li>
+  </ol>
+</div>
 
-  <section>
-    <h2>Code Flow and Functionality</h2>
-    <h3>1. Initialization</h3>
-    <p>The program starts by linking any necessary patches and initializing the logger:</p>
-    <pre><code>
-esp_idf_svc::sys::link_patches();
-EspLogger::initialize_default();
-    </code></pre>
-    <p>It then takes ownership of the available hardware peripherals and GPIO pins.</p>
+<div class="section">
+  <h2>Pseudo Code Flowchart</h2>
+  <pre>
+Start
+|
+|-- Initialize ESP-IDF system and logger
+|
+|-- Take peripherals and set up system event loop
+|
+|-- Configure and initialize I2S driver
+|
+|-- Enable I2S receiver
+|
+|-- Set up FFT planner and Hann window
+|
+|-- Configure WiFi as Access Point
+|
+|-- Start HTTP server
+|   |
+|   |-- Serve HTML page at "/"
+|   |
+|   |-- Serve FFT data at "/api/fft"
+|
+|-- Spawn FFT processing task
+|   |
+|   |-- Loop:
+|       |
+|       |-- Lock I2S driver
+|       |
+|       |-- Read I2S data into buffer
+|       |
+|       |-- Accumulate data until 4096 bytes
+|       |
+|       |-- If accumulated enough:
+|           |
+|           |-- Apply Hann window to samples
+|           |
+|           |-- Perform FFT
+|           |
+|           |-- Calculate magnitudes and find dominant frequency
+|           |
+|           |-- Update shared state
+|
+|-- Main loop: delay indefinitely
+        </pre>
+</div>
 
-    <h3>2. I2S Configuration</h3>
-    <p>The I2S configuration is set up for the Philips I2S standard with a sample rate of 44.1 kHz and a data width of 16 bits. The configuration is tailored for an INMP441 microphone:</p>
-    <pre><code>
-let config = StdConfig::philips(44100, DataBitWidth::Bits16);
-    </code></pre>
-    <p>The I2S driver is then initialized in standard receive mode. The pins for Bit Clock (BCLK), Data In (DIN), and Word Select (WS) are specified, while the Master Clock (MCLK) is set as <code>None</code> (using an explicit type for clarity):</p>
-    <pre><code>
-let mut i2s = I2sDriver::new_std_rx(
-    peripherals.i2s0,
-    &config,
-    pins.gpio14,       // BCLK (bit clock)
-    pins.gpio34,       // DIN (data in)
-    None::<AnyIOPin>,  // MCLK (not used)
-    pins.gpio15,       // WS (word select)
-)?;
-    </code></pre>
-    <p>The I2S receiver is enabled after configuration.</p>
-
-    <h3>3. Main Loop – Data Acquisition and Processing</h3>
-    <p>The main loop continuously performs the following steps:</p>
-    <ol>
-      <li>
-        <strong>Data Acquisition:</strong>
-        <p>A buffer is allocated to hold 1024 samples (each sample is 4 bytes, leading to a total of 4096 bytes). The I2S driver reads data into the buffer with a 1-second timeout. If fewer than 4096 bytes are read, a log entry is generated and the loop continues.</p>
-      </li>
-      <li>
-        <strong>Data Conversion:</strong>
-        <p>The 32-bit little-endian byte data is converted into <code>i32</code> values. Each value is then normalized to a floating-point number between -1.0 and 1.0 by dividing by <code>2^31</code> (2147483648.0).</p>
-      </li>
-      <li>
-        <strong>FFT Processing:</strong>
-        <p>
-          An FFT is performed on the normalized floating-point samples using the <code>rustfft</code> library:
-          <br>
-          <em>•</em> A planner creates an FFT plan for 1024 points.
-          <br>
-          <em>•</em> Samples are converted to a vector of <code>Complex&lt;f32&gt;</code> values (with the imaginary part set to 0.0).
-          <br>
-          <em>•</em> The FFT is processed in-place.
-        </p>
-      </li>
-      <li>
-        <strong>Dominant Frequency Detection:</strong>
-        <p>
-          The magnitudes of the FFT results are calculated for frequency bins up to the Nyquist frequency (first 512 bins). The code then finds the frequency bin (ignoring the DC component) with the highest magnitude and computes the corresponding frequency using the relation:
-          <br>
-          <code>frequency = bin_index * (sample_rate / fft_size)</code>.
-        </p>
-      </li>
-      <li>
-        <strong>Delay:</strong>
-        <p>A delay of 1 second is added before the next iteration using FreeRTOS's delay function.</p>
-      </li>
-    </ol>
-  </section>
-
-  <section>
-    <h2>Logging and Output</h2>
-    <p>The <code>log::info</code> macro is used to log information about the read data (including partial reads) and the computed dominant frequency in Hertz. This allows for real-time monitoring of the frequency analysis results.</p>
-  </section>
-
-  <section>
-    <h2>Dependencies and Libraries</h2>
-    <ul>
-      <li><strong>esp_idf_hal:</strong> Provides hardware abstractions and I2S driver implementations.</li>
-      <li><strong>esp_idf_svc:</strong> Supplies logging and system services.</li>
-      <li><strong>rustfft:</strong> Library for performing fast Fourier transforms.</li>
-      <li><strong>anyhow:</strong> Simplifies error handling by providing the <code>Result</code> type alias.</li>
-      <li><strong>log:</strong> Enables logging at various levels (info, error, etc.).</li>
-    </ul>
-  </section>
-
-  <section>
-    <h2>Usage</h2>
-    <p>
-      To use this code on an ESP32 with an INMP441 microphone:
-    </p>
-    <ol>
-      <li>Ensure the ESP-IDF environment and Rust toolchain (with esp-idf support) are properly configured.</li>
-      <li>Connect the microphone to the specified GPIO pins:
-        <ul>
-          <li>GPIO14 for BCLK</li>
-          <li>GPIO34 for DIN</li>
-          <li>GPIO15 for WS</li>
-        </ul>
-      </li>
-      <li>Build and flash the firmware onto the ESP32 device.</li>
-      <li>Monitor the logs to see the dominant frequency computed from the incoming audio.</li>
-    </ol>
-  </section>
-
-  <section>
-    <h2>Notes and Considerations</h2>
-    <p>
-      <strong>Normalization:</strong> The sample normalization uses a divisor of 2<sup>31</sup>. Ensure that this fits the expected dynamic range of the captured data.
-    </p>
-    <p>
-      <strong>Data Width:</strong> Although the I2S is configured with 16-bit data, the code reads 32 bits per sample. Adjustments might be necessary depending on the actual microphone output and data representation.
-    </p>
-    <p>
-      <strong>Performance:</strong> FFT processing on a microcontroller requires careful management of resources. Ensure that the ESP32 has enough processing power for your application and that the FFT size meets your requirements.
-    </p>
-  </section>
-
-  <footer>
-    <p>Documentation generated for the FFT-based audio processing example using ESP-IDF HAL and rustfft.</p>
-  </footer>
 </body>
 </html>

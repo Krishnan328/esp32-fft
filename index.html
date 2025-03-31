@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 FFT Spectrum Analyzer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #222;
+            color: #eee;
+        }
+        .container {
+            width: 90vw;
+            height: 90vh;
+            display: grid;
+            grid-template-rows: auto 1fr auto;
+            gap: 10px;
+        }
+        h1 {
+            color: #4CAF50;
+            text-align: center;
+        }
+        canvas {
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+            border-radius: 5px;
+        }
+        .info {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+        }
+        .info div {
+            background-color: #333;
+            padding: 10px;
+            border-radius: 5px;
+            flex: 1;
+            margin: 0 5px;
+            text-align: center;
+        }
+        .info span {
+            font-size: 24px;
+            color: #4CAF50;
+            display: block;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>ESP32 FFT Spectrum Analyzer</h1>
+    <canvas id="fftCanvas"></canvas>
+    <div class="info">
+        <div>
+            Dominant Frequency
+            <span id="dominantFreq">0 Hz</span>
+        </div>
+        <div>
+            Update Rate
+            <span id="updateRate">0 fps</span>
+        </div>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('fftCanvas');
+    const ctx = canvas.getContext('2d');
+    const dominantFreqElem = document.getElementById('dominantFreq');
+    const updateRateElem = document.getElementById('updateRate');
+
+    // Variables for FPS calculation
+    let frameCount = 0;
+    let lastFpsUpdateTime = 0;
+
+    // Variables to adjust the audio sampling rate and FFT Bin size
+    const SAMPLING_RATE = 48000;  // Change this value in constants.rs too!
+    const FFT_LENGTH = 2048;      // Change this value in constants.rs too!
+    const FREQUENCY_MAGNITUDE_LENGHT = FFT_LENGTH / 2;  // Change this value in constants.rs too!
+
+    // Audio frequency range
+    const minFreq = 20;    // 20 Hz
+    const maxFreq = 22000; // 20 kHz
+
+    // Resize canvas to match display size
+    function resizeCanvas() {
+        canvas.width = canvas.offsetWidth;
+        canvas.height = canvas.offsetHeight;
+        drawFrequencyScale();
+    }
+
+    // Initial resize
+    resizeCanvas();
+
+    // Update canvas on window resize
+    window.addEventListener('resize', resizeCanvas);
+
+    // Function to draw logarithmic frequency scale
+    function drawFrequencyScale() {
+        const width = canvas.width;
+        const height = canvas.height;
+
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, height);
+
+        // Draw grid lines
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 1;
+
+        // Horizontal grid lines (amplitude)
+        for (let i = 0; i < 10; i++) {
+            const y = height - (i * height / 10);
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(width, y);
+            ctx.stroke();
+        }
+
+        // Vertical grid lines (frequency - logarithmic)
+        const decades = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 22000];
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '14px Arial';
+
+        decades.forEach(freq => {
+            const x = width * (Math.log10(freq) - Math.log10(minFreq)) / (Math.log10(maxFreq) - Math.log10(minFreq));
+            
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, height);
+            ctx.stroke();
+
+            // Add frequency label
+            let label = freq.toString();
+            if (freq >= 1000) {
+                label = (freq / 1000) + 'k';
+            }
+            const textWidth = ctx.measureText(label).width;
+            if (x - textWidth / 2 < 0) {
+                ctx.textAlign = 'left';
+            } else if (x + textWidth / 2 > width) {
+                ctx.textAlign = 'right';
+            } else {
+                ctx.textAlign = 'center';
+            }
+            ctx.fillText(label, x, height - 5);
+        });
+    }
+
+    // Function to update the spectrum visualization
+    function updateSpectrum(magnitudes, dominantFrequency) {
+        const width = canvas.width;
+        const height = canvas.height;
+
+        // Clear and redraw the background
+        drawFrequencyScale();
+
+        // Smooth the magnitudes with a moving average
+        let smoothed_magnitudes = [];
+        for (let i = 0; i < magnitudes.length; i++) {
+            if (i === 0) {
+                smoothed_magnitudes[i] = (magnitudes[i] + magnitudes[i + 1]) / 2;
+            } else if (i === magnitudes.length - 1) {
+                smoothed_magnitudes[i] = (magnitudes[i - 1] + magnitudes[i]) / 2;
+            } else {
+                smoothed_magnitudes[i] = (magnitudes[i - 1] + magnitudes[i] + magnitudes[i + 1]) / 3;
+            }
+        }
+
+        // Draw the spectrum
+        ctx.beginPath();
+        ctx.moveTo(0, height);
+
+        for (let i = 1; i < smoothed_magnitudes.length; i++) {
+            const frequency = i * (SAMPLING_RATE / FFT_LENGTH);
+            if (frequency < minFreq || frequency > maxFreq) continue;
+            const x = width * (Math.log10(frequency) - Math.log10(minFreq)) / (Math.log10(maxFreq) - Math.log10(minFreq));
+            const magnitude = Math.max(0.0000001, smoothed_magnitudes[i]);
+            const dB = 20 * Math.log10(magnitude);
+            const normalizedDb = (dB + 100) / 100; // Normalize to 0-1 (assuming -100dB to 0dB range)
+            const y = height - (normalizedDb * height);
+            ctx.lineTo(x, y);
+        }
+
+        ctx.lineTo(width, height);
+        ctx.closePath();
+
+        // Fill the spectrum area with gradient
+        const gradient = ctx.createLinearGradient(0, 0, 0, height);
+        gradient.addColorStop(0, 'rgba(76, 175, 80, 0.8)');
+        gradient.addColorStop(1, 'rgba(76, 175, 80, 0.1)');
+        ctx.fillStyle = gradient;
+        ctx.fill();
+
+        // Update dominant frequency display
+        dominantFreqElem.textContent = dominantFrequency.toFixed(1) + ' Hz';
+
+        // Update FPS counter
+        frameCount++;
+        const now = performance.now();
+        if (now - lastFpsUpdateTime > 1000) {
+            const fps = Math.round(frameCount * 1000 / (now - lastFpsUpdateTime));
+            updateRateElem.textContent = fps + ' fps';
+            frameCount = 0;
+            lastFpsUpdateTime = now;
+        }
+    }
+
+    // Function to fetch FFT data
+    async function fetchFFTData() {
+        try {
+            // Fetch the binary data from the /api/fft endpoint
+            const response = await fetch('/api/fft');
+            const arrayBuffer = await response.arrayBuffer();
+            
+            // Convert the ArrayBuffer to a Float32Array
+            const floatArray = new Float32Array(arrayBuffer);
+            
+            // Extract magnitudes and dominant frequency
+            const magnitudes = floatArray.slice(0, FREQUENCY_MAGNITUDE_LENGHT);
+            const dominantFrequency = floatArray[FREQUENCY_MAGNITUDE_LENGHT];
+            
+            // Update the spectrum visualization
+            updateSpectrum(magnitudes, dominantFrequency);
+        } catch (error) {
+            console.error('Error fetching FFT data:', error);
+        }
+        
+        // Schedule the next fetch (adjust timing for desired fps, e.g., 33.33ms ~ 30 fps)
+        setTimeout(fetchFFTData, 33.33);
+    }
+
+    // Start fetching data
+    fetchFFTData();
+</script>
+</body>
+</html>

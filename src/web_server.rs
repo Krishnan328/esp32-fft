@@ -1,5 +1,6 @@
 use anyhow::Result;
 use esp_idf_hal::modem::Modem;
+use esp_idf_svc::http::Method;
 use esp_idf_svc::{
 	eventloop::EspSystemEventLoop,
 	http::server::{Configuration, EspHttpServer},
@@ -70,6 +71,20 @@ pub fn init_http_server(server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<EspHt
 			Ok::<(), EspIOError>(())
 		})
 		.expect("Failed to register index handler");
+
+	server
+		.fn_handler("/api/impulse", Method::Post, move |mut request| {
+			// This is a basic handler that acknowledges receipt
+			// In a full implementation, you could store impulse data
+			let mut buf = [0u8; 1024];
+			let _size = request.read(&mut buf)?;
+
+			// Just acknowledge receipt
+			let mut resp = request.into_ok_response()?;
+			resp.write(b"{\"status\":\"ok\"}")?;
+			Ok::<(), EspIOError>(())
+		})
+		.expect("Failed to register impulse API handler");
 
 	// API endpoint to get FFT data
 	server

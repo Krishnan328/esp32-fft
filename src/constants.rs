@@ -23,8 +23,6 @@ pub const AMPLITUDE_THRESHOLD: AmplitudeThreshold = AmplitudeThreshold {
 	high_freq_threshold: 0.001, // For ≥frequency_cutoff (keep between 0.05 to 0.005)
 };
 
-pub const BUTTON_PIN: u32 = 32; // Choose an appropriate GPIO pin for your button
-
 pub static WIFI_SSID: &str = "ESP32-FFT-Analyzer";
 
 pub const WIFI_PASSWORD: &str = "spectrum123";

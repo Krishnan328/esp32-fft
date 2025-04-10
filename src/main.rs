@@ -24,6 +24,7 @@ use web_server::*;
 struct FFTData {
 	magnitudes: [f32; FREQUENCY_MAGNITUDE_LENGHT],
 	dominant_frequency: f32,
+	is_recording: bool,
 }
 
 fn main() -> Result<()> {
@@ -38,6 +39,10 @@ fn main() -> Result<()> {
 	let pins = peripherals.pins;
 	let modem = peripherals.modem;
 
+	// Configure button pin as input with pull-down
+	let mut button = PinDriver::input(pins.gpio14.downgrade())?;
+	button.set_pull(Pull::Down)?; // Configure with pull-down resistor
+
 	// Create shared state for FFT data with RwLock
 	// let system_state: Arc<RwLock<SystemState>> = Arc::new(RwLock::new(SystemState {
 	// 	magnitudes: vec![0.0; FREQUENCY_MAGNITUDE_LENGHT],
@@ -47,6 +52,7 @@ fn main() -> Result<()> {
 	let system_state: Arc<RwLock<Arc<FFTData>>> = Arc::new(RwLock::new(Arc::new(FFTData {
 		magnitudes: [0.0; FREQUENCY_MAGNITUDE_LENGHT],
 		dominant_frequency: 0.0,
+		is_recording: false,
 	})));
 
 	// Clone state for the Wi-Fi/server thread
@@ -93,95 +99,132 @@ fn main() -> Result<()> {
 
 	// Main FFT loop
 	loop {
-		while acc_index < FFT_LENGTH_BYTES {
-			match i2s.read(&mut buffer, timeout) {
-				Ok(bytes_read) => {
-					let space_left = FFT_LENGTH_BYTES - acc_index;
-					let bytes_to_copy = bytes_read.min(space_left);
-					accumulated_buffer[acc_index..acc_index + bytes_to_copy]
-						.copy_from_slice(&buffer[..bytes_to_copy]);
-					acc_index += bytes_to_copy;
-				}
-				Err(e) => {
-					error!("I2S read error: {:?}", e);
-					break;
+		let is_button_pressed = button.get_level() == Level::High;
+
+		// Update recording state in shared data
+		let current_state = {
+			let read_guard = system_state.read().unwrap();
+			let current_data = read_guard.clone();
+
+			// If state changed, log it
+			if current_data.is_recording != is_button_pressed {
+				if is_button_pressed {
+					info!("Button pressed: Starting FFT recording");
+				} else {
+					info!("Button released: Pausing FFT recording");
+					// Reset buffer when stopping recording
+					acc_index = 0;
 				}
 			}
+
+			current_data
+		};
+
+		// If recording state changed, update shared state
+		if current_state.is_recording != is_button_pressed {
+			*system_state.write().unwrap() = Arc::new(FFTData {
+				magnitudes: current_state.magnitudes,
+				dominant_frequency: current_state.dominant_frequency,
+				is_recording: is_button_pressed,
+			});
 		}
 
-		if acc_index >= FFT_LENGTH_BYTES {
-			// Process accumulated buffer for FFT
-			let mut samples: Vec<Complex<f32>> = vec![Complex::<f32>::new(0.0, 0.0); FFT_LENGTH];
-
-			// Apply Hann window and prepare samples
-			for i in 0..FFT_LENGTH {
-				let offset = i * 4;
-				let val = i32::from_le_bytes([
-					accumulated_buffer[offset],
-					accumulated_buffer[offset + 1],
-					accumulated_buffer[offset + 2],
-					accumulated_buffer[offset + 3],
-				]);
-				let sample_f32 = (val as f32) / 2147483648.0 * hann_window[i];
-				samples[i] = Complex::new(sample_f32, 0.0);
-			}
-
-			// Perform FFT
-			fft.process(&mut samples);
-
-			// Calculate magnitudes and find dominant frequency
-			let scale_factor: f32 = 1.0 / FFT_LENGTH as f32;
-			let mut magnitudes: [f32; FREQUENCY_MAGNITUDE_LENGHT] =
-				[0.0; FREQUENCY_MAGNITUDE_LENGHT];
-			let mut max_mag: f32 = 0.0;
-			let mut max_index = 0;
-
-			for i in 0..FREQUENCY_MAGNITUDE_LENGHT {
-				magnitudes[i] = samples[i].norm() * scale_factor; // Magnitude from FFT
-				let frequency = i as f32 * FREQ_BIN_WIDTH;
-				let threshold = if frequency < AMPLITUDE_THRESHOLD.frequency_cutoff {
-					AMPLITUDE_THRESHOLD.low_freq_threshold
-				} else {
-					AMPLITUDE_THRESHOLD.high_freq_threshold
-				};
-				if magnitudes[i] > threshold && magnitudes[i] > max_mag {
-					max_mag = magnitudes[i];
-					max_index = i;
+		if is_button_pressed {
+			while acc_index < FFT_LENGTH_BYTES {
+				match i2s.read(&mut buffer, timeout) {
+					Ok(bytes_read) => {
+						let space_left = FFT_LENGTH_BYTES - acc_index;
+						let bytes_to_copy = bytes_read.min(space_left);
+						accumulated_buffer[acc_index..acc_index + bytes_to_copy]
+							.copy_from_slice(&buffer[..bytes_to_copy]);
+						acc_index += bytes_to_copy;
+					}
+					Err(e) => {
+						error!("I2S read error: {:?}", e);
+						break;
+					}
 				}
 			}
 
-			// Quadratic Interpolation to find dominant frequency
-			let frequency: f32 = if max_mag > 0.0 {
-				if max_index > 0 && max_index < FREQUENCY_MAGNITUDE_LENGHT - 1 {
-					let y_km1 = magnitudes[max_index - 1];
-					let y_k = magnitudes[max_index];
-					let y_kp1 = magnitudes[max_index + 1];
-					let denom = y_km1 - 2.0 * y_k + y_kp1;
-					if denom != 0.0 {
-						let p = 0.5 * (y_km1 - y_kp1) / denom;
-						(max_index as f32 + p) * FREQ_BIN_WIDTH
+			if acc_index >= FFT_LENGTH_BYTES {
+				// Process accumulated buffer for FFT
+				let mut samples: Vec<Complex<f32>> =
+					vec![Complex::<f32>::new(0.0, 0.0); FFT_LENGTH];
+
+				// Apply Hann window and prepare samples
+				for i in 0..FFT_LENGTH {
+					let offset = i * 4;
+					let val = i32::from_le_bytes([
+						accumulated_buffer[offset],
+						accumulated_buffer[offset + 1],
+						accumulated_buffer[offset + 2],
+						accumulated_buffer[offset + 3],
+					]);
+					let sample_f32 = (val as f32) / 2147483648.0 * hann_window[i];
+					samples[i] = Complex::new(sample_f32, 0.0);
+				}
+
+				// Perform FFT
+				fft.process(&mut samples);
+
+				// Calculate magnitudes and find dominant frequency
+				let scale_factor: f32 = 1.0 / FFT_LENGTH as f32;
+				let mut magnitudes: [f32; FREQUENCY_MAGNITUDE_LENGHT] =
+					[0.0; FREQUENCY_MAGNITUDE_LENGHT];
+				let mut max_mag: f32 = 0.0;
+				let mut max_index = 0;
+
+				for i in 0..FREQUENCY_MAGNITUDE_LENGHT {
+					magnitudes[i] = samples[i].norm() * scale_factor; // Magnitude from FFT
+					let frequency = i as f32 * FREQ_BIN_WIDTH;
+					let threshold = if frequency < AMPLITUDE_THRESHOLD.frequency_cutoff {
+						AMPLITUDE_THRESHOLD.low_freq_threshold
+					} else {
+						AMPLITUDE_THRESHOLD.high_freq_threshold
+					};
+					if magnitudes[i] > threshold && magnitudes[i] > max_mag {
+						max_mag = magnitudes[i];
+						max_index = i;
+					}
+				}
+
+				// Quadratic Interpolation to find dominant frequency
+				let frequency: f32 = if max_mag > 0.0 {
+					if max_index > 0 && max_index < FREQUENCY_MAGNITUDE_LENGHT - 1 {
+						let y_km1 = magnitudes[max_index - 1];
+						let y_k = magnitudes[max_index];
+						let y_kp1 = magnitudes[max_index + 1];
+						let denom = y_km1 - 2.0 * y_k + y_kp1;
+						if denom != 0.0 {
+							let p = 0.5 * (y_km1 - y_kp1) / denom;
+							(max_index as f32 + p) * FREQ_BIN_WIDTH
+						} else {
+							max_index as f32 * FREQ_BIN_WIDTH
+						}
 					} else {
 						max_index as f32 * FREQ_BIN_WIDTH
 					}
 				} else {
-					max_index as f32 * FREQ_BIN_WIDTH
-				}
-			} else {
-				0.0
-			};
+					0.0
+				};
 
-			let updated_fft_data: Arc<FFTData> = Arc::new(FFTData {
-				magnitudes,
-				dominant_frequency: frequency,
-			});
+				let updated_fft_data: Arc<FFTData> = Arc::new(FFTData {
+					magnitudes,
+					dominant_frequency: frequency,
+					is_recording: true,
+				});
 
-			// info!("Updated FFT data, dominant frequency: {:.2} Hz", frequency); // Uncomment to print dominant freq. to console
-			// info!("Updated FFT data, magnitudes: {:?}", &state.magnitudes); // Uncomment to print all magnitudes
+				// info!("Updated FFT data, dominant frequency: {:.2} Hz", frequency); // Uncomment to print dominant freq. to console
+				// info!("Updated FFT data, magnitudes: {:?}", &state.magnitudes); // Uncomment to print all magnitudes
 
-			// Update shared state with new FFT data
-			*system_state.write().unwrap() = updated_fft_data;
+				// Update shared state with new FFT data
+				*system_state.write().unwrap() = updated_fft_data;
 
-			acc_index = 0;
+				acc_index = 0;
+			}
+		} else {
+			// Small delay to avoid busy-waiting when not recording
+			std::thread::sleep(std::time::Duration::from_millis(50));
 		}
 	}
 }

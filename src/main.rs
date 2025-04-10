@@ -52,7 +52,7 @@ fn main() -> Result<()> {
 	let system_state: Arc<RwLock<Arc<FFTData>>> = Arc::new(RwLock::new(Arc::new(FFTData {
 		magnitudes: [0.0; FREQUENCY_MAGNITUDE_LENGHT],
 		dominant_frequency: 0.0,
-		is_recording: false,
+		is_recording: true,
 	})));
 
 	// Clone state for the Wi-Fi/server thread
@@ -71,10 +71,10 @@ fn main() -> Result<()> {
 	let mut i2s = I2sDriver::new_std_rx(
 		peripherals.i2s0,
 		&config,
-		pins.gpio25, // sck
-		pins.gpio26, // sd
+		pins.gpio4,  // sck
+		pins.gpio22, // sd
 		None::<AnyIOPin>,
-		pins.gpio27, // ws
+		pins.gpio21, // ws
 	)?;
 
 	// Enable I2S receiver
@@ -99,7 +99,8 @@ fn main() -> Result<()> {
 
 	// Main FFT loop
 	loop {
-		let is_button_pressed = button.get_level() == Level::High;
+		// let is_button_pressed = button.get_level() == Level::High;
+		let is_button_pressed = true;
 
 		// Update recording state in shared data
 		let current_state = {

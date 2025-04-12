@@ -260,6 +260,25 @@ fn main() -> Result<()> {
 						"Impulse detected at {} ms, dominant frequency: {:.2} Hz",
 						now, frequency
 					);
+
+					// Classify coconut type based on dominant frequency
+					let coconut_type = if (2000.0..=2500.0).contains(&frequency) {
+						"BROWN COCONUT"
+					} else if (750.0..=890.0).contains(&frequency) {
+						"FLESHY COCONUT"
+					} else if (900.0..=1400.0).contains(&frequency) {
+						"WATER COCONUT"
+					} else {
+						"UNKNOWN"
+					};
+
+					// Log the coconut type if it's identified
+					if coconut_type != "UNKNOWN" {
+						info!(
+							"COCONUT TYPE DETECTED: {} (Frequency: {:.2} Hz)",
+							coconut_type, frequency
+						);
+					}
 				}
 
 				let updated_fft_data: Arc<FFTData> = Arc::new(FFTData {

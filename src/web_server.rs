@@ -1,5 +1,6 @@
 use anyhow::Result;
 use esp_idf_hal::modem::Modem;
+use esp_idf_svc::http::server::ws::EspHttpWsConnection;
 use esp_idf_svc::{
 	eventloop::EspSystemEventLoop,
 	http::server::{Configuration, EspHttpServer},
@@ -74,54 +75,54 @@ pub fn init_http_server(server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<EspHt
 		})
 		.expect("Failed to register index handler");
 
-	// server
-	// 	.fn_handler(
-	// 		"/api/latest_impulse",
-	// 		esp_idf_svc::http::Method::Get,
-	// 		move |request| {
-	// 			let current_data = if let Ok(state) = server_state_impulse.read() {
-	// 				state.clone()
-	// 			} else {
-	// 				let mut resp =
-	// 					request.into_response(500, Some("Internal Server Error"), &[])?;
-	// 				resp.write(b"Internal server error")?;
-	// 				return Ok(());
-	// 			};
+	server
+		.fn_handler(
+			"/api/latest_impulse",
+			esp_idf_svc::http::Method::Get,
+			move |request| {
+				let current_data = if let Ok(state) = server_state_impulse.read() {
+					state.clone()
+				} else {
+					let mut resp =
+						request.into_response(500, Some("Internal Server Error"), &[])?;
+					resp.write(b"Internal server error")?;
+					return Ok(());
+				};
 
-	// 			let mut resp = request.into_response(
-	// 				200,
-	// 				Some("OK"),
-	// 				&[("Content-Type", "application/json")],
-	// 			)?;
+				let mut resp = request.into_response(
+					200,
+					Some("OK"),
+					&[("Content-Type", "application/json")],
+				)?;
 
-	// 			if let Some(impulse) = &current_data.latest_impulse {
-	// 				// Convert impulse data to JSON
-	// 				let peaks_json = impulse
-	// 					.peaks
-	// 					.iter()
-	// 					.map(|peak| {
-	// 						format!(
-	// 							"{{\"index\":{},\"frequency\":{},\"magnitude\":{}}}",
-	// 							peak.index, peak.frequency, peak.magnitude
-	// 						)
-	// 					})
-	// 					.collect::<Vec<String>>()
-	// 					.join(",");
+				if let Some(impulse) = &current_data.latest_impulse {
+					// Convert impulse data to JSON
+					let peaks_json = impulse
+						.peaks
+						.iter()
+						.map(|peak| {
+							format!(
+								"{{\"index\":{},\"frequency\":{},\"magnitude\":{}}}",
+								peak.index, peak.frequency, peak.magnitude
+							)
+						})
+						.collect::<Vec<String>>()
+						.join(",");
 
-	// 				let json = format!(
-	// 					"{{\"timestamp\":{},\"dominantFrequency\":{},\"peaks\":[{}]}}",
-	// 					impulse.timestamp, impulse.dominant_frequency, peaks_json
-	// 				);
+					let json = format!(
+						"{{\"timestamp\":{},\"dominantFrequency\":{},\"peaks\":[{}]}}",
+						impulse.timestamp, impulse.dominant_frequency, peaks_json
+					);
 
-	// 				resp.write(json.as_bytes())?;
-	// 			} else {
-	// 				resp.write(b"{\"status\":\"no_impulse\"}")?;
-	// 			}
+					resp.write(json.as_bytes())?;
+				} else {
+					resp.write(b"{\"status\":\"no_impulse\"}")?;
+				}
 
-	// 			Ok::<(), EspIOError>(())
-	// 		},
-	// 	)
-	// 	.expect("Failed to register latest impulse API handler");
+				Ok::<(), EspIOError>(())
+			},
+		)
+		.expect("Failed to register latest impulse API handler");
 
 	// API endpoint to get FFT data
 	server

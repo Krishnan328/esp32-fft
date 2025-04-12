@@ -229,7 +229,8 @@ fn main() -> Result<()> {
 				// Check if this is an impulse (sudden change in magnitude)
 				if delta > IMPULSE_THRESHOLD
 					&& now - unsafe { LAST_IMPULSE_TIME } > IMPULSE_TIME_THRESHOLD
-					&& frequency > 0.0
+					&& frequency > 100.0
+				// No impulse below 100hz is required as the coconut is giving impulse at and above 100Hz.
 				{
 					unsafe {
 						LAST_IMPULSE_TIME = now;

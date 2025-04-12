@@ -143,6 +143,10 @@
 					Last Impulse
 					<span id="lastImpulse">None</span>
 				</div>
+				<div>
+					Coconut Type
+					<span id="coconutType">Unknown</span>
+				</div>
 			</div>
 		</div>
 
@@ -171,6 +175,7 @@
 			let lastImpulseTime = 0;
 			const impulseLogElement = document.getElementById("impulseLog");
 			const lastImpulseElement = document.getElementById("lastImpulse");
+			const coconutTypeElement = document.getElementById("coconutType");
 			const maxLogEntries = 50; // Maximum number of log entries to show
 
 			// Resize canvas to match display size
@@ -343,13 +348,19 @@
 								)
 								.join(", ");
 
+							// Update the coconut type
+							if (data.coconutType) {
+								coconutTypeElement.textContent = data.coconutType;
+							}
+
 							const entry = document.createElement("div");
 							entry.className = "impulse-entry";
 							entry.innerHTML = `
-                    <div class="impulse-time">${timestamp}</div>
-                    <div class="impulse-freq">Dominant: ${data.dominantFrequency.toFixed(1)} Hz</div>
-                    <div class="impulse-data">Peaks: ${peaksFormatted}</div>
-                `;
+						        <div class="impulse-time">${timestamp}</div>
+						        <div class="impulse-freq">Dominant: ${data.dominantFrequency.toFixed(1)} Hz</div>
+						        <div class="impulse-data">Peaks: ${peaksFormatted}</div>
+						        <div class="impulse-data">Type: ${data.coconutType || "Unknown"}</div>
+						    `;
 
 							impulseLogElement.prepend(entry);
 							while (impulseLogElement.children.length > maxLogEntries) {

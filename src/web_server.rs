@@ -112,8 +112,8 @@ pub fn init_http_server(server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<EspHt
 						.collect::<Vec<String>>()
 						.join(",");
 					let json = format!(
-						"{{\"timestamp\":{},\"dominantFrequency\":{},\"peaks\":[{}]}}",
-						impulse.timestamp, impulse.dominant_frequency, peaks_json
+					    "{{\"timestamp\":{},\"dominantFrequency\":{},\"peaks\":[{}],\"coconutType\":\"{}\"}}",
+					    impulse.timestamp, impulse.dominant_frequency, peaks_json, impulse.coconut_type
 					);
 					if ws.send(FrameType::Text(false), json.as_bytes()).is_err() {
 						info!("WebSocket client disconnected");
@@ -124,7 +124,7 @@ pub fn init_http_server(server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<EspHt
 			}
 
 			// Control update rate (~60 Hz)
-			std::thread::sleep(Duration::from_millis(8));
+			std::thread::sleep(Duration::from_millis(AUDIO_UPDATE_PER_SECOND / 2));
 		}
 		Ok::<(), EspIOError>(())
 	})?;

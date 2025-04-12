@@ -18,9 +18,9 @@ pub const FREQ_BIN_WIDTH: f32 = SAMPLING_RATE as f32 / FFT_LENGTH as f32;
 
 // Tune this value to remove noise of low amplitude from signal
 pub const AMPLITUDE_THRESHOLD: AmplitudeThreshold = AmplitudeThreshold {
-	frequency_cutoff: 1000.0,   // amplitude threshold boundary
-	low_freq_threshold: 0.0005, // For <frequency_cutoff (keep between 0.001 to 0.0005)
-	high_freq_threshold: 0.001, // For ≥frequency_cutoff (keep between 0.05 to 0.005)
+	frequency_cutoff: 1000.0,    // amplitude threshold boundary
+	low_freq_threshold: 0.0005,  // For <frequency_cutoff (keep between 0.001 to 0.0005)
+	high_freq_threshold: 0.0005, // For ≥frequency_cutoff (keep between 0.05 to 0.005)
 };
 
 pub const IMPULSE_THRESHOLD: f32 = 0.0012;
@@ -29,6 +29,8 @@ pub const IMPULSE_TIME_THRESHOLD: u64 = 100; // ms
 pub static WIFI_SSID: &str = "ESP32-FFT-Analyzer";
 
 pub const WIFI_PASSWORD: &str = "spectrum123";
+
+pub const AUDIO_UPDATE_PER_SECOND: u64 = 16; // in milliseconds, for aps divide APS by 1000
 
 pub struct AmplitudeThreshold {
 	pub frequency_cutoff: f32,
@@ -40,6 +42,7 @@ pub struct ImpulseData {
 	pub timestamp: u64,
 	pub dominant_frequency: f32,
 	pub peaks: Vec<PeakData>,
+	pub coconut_type: String,
 }
 
 pub struct PeakData {

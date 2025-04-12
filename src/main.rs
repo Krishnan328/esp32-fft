@@ -249,13 +249,6 @@ fn main() -> Result<()> {
 						})
 						.collect();
 
-					// Create impulse data
-					detected_impulse = Some(ImpulseData {
-						timestamp: now,
-						dominant_frequency: frequency,
-						peaks,
-					});
-
 					info!(
 						"Impulse detected at {} ms, dominant frequency: {:.2} Hz",
 						now, frequency
@@ -279,6 +272,14 @@ fn main() -> Result<()> {
 							coconut_type, frequency
 						);
 					}
+
+					// Create impulse data
+					detected_impulse = Some(ImpulseData {
+						timestamp: now,
+						dominant_frequency: frequency,
+						peaks,
+						coconut_type: coconut_type.to_string(),
+					});
 				}
 
 				let updated_fft_data: Arc<FFTData> = Arc::new(FFTData {
@@ -298,7 +299,7 @@ fn main() -> Result<()> {
 			}
 		} else {
 			// Small delay to avoid busy-waiting when not recording
-			std::thread::sleep(std::time::Duration::from_millis(8));
+			std::thread::sleep(std::time::Duration::from_millis(AUDIO_UPDATE_PER_SECOND));
 		}
 	}
 }

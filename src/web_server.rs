@@ -1,5 +1,7 @@
 use anyhow::Result;
 use esp_idf_hal::modem::Modem;
+use esp_idf_svc::http::server::ws::EspHttpWsConnection;
+use esp_idf_svc::ws::FrameType;
 use esp_idf_svc::{
 	eventloop::EspSystemEventLoop,
 	http::server::{Configuration, EspHttpServer},
@@ -61,6 +63,9 @@ pub fn init_http_server(server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<EspHt
 	let mut server =
 		EspHttpServer::new(&Configuration::default()).expect("Failed to create HTTP server");
 
+	let server_state_ws = server_state.clone();
+	// let server_state_fft = server_state.clone();
+
 	// Serve the main HTML page
 	server
 		.fn_handler("/", esp_idf_svc::http::Method::Get, move |request| {
@@ -71,35 +76,60 @@ pub fn init_http_server(server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<EspHt
 		})
 		.expect("Failed to register index handler");
 
-	// API endpoint to get FFT data
-	server
-		.fn_handler("/api/fft", esp_idf_svc::http::Method::Get, move |request| {
-			let current_data = if let Ok(state) = server_state.read() {
-				state.clone()
-			} else {
-				// Handle lock error gracefully
-				let mut resp = request.into_response(500, Some("Internal Server Error"), &[])?;
-				resp.write(b"Internal server error")?;
-				return Ok(());
+	// WebSocket endpoint
+	server.ws_handler("/ws", move |ws: &mut EspHttpWsConnection| {
+		let mut last_impulse_timestamp = None;
+		loop {
+			// Access the latest FFT data
+			let current_data = {
+				let read_guard = server_state_ws.read().unwrap();
+				read_guard.clone()
 			};
 
-			let mut resp = request.into_ok_response()?;
-			let magnitudes_bytes: &[u8] = unsafe {
-				std::slice::from_raw_parts(
-					current_data.magnitudes.as_ptr() as *const u8,
-					current_data.magnitudes.len() * std::mem::size_of::<f32>(),
-				)
-			};
-			// Write dominant frequency as binary data
-			let dominant_freq_bytes = current_data.dominant_frequency.to_le_bytes();
+			// Serialize and send FFT data as binary
+			let mut fft_data = Vec::with_capacity(FREQUENCY_MAGNITUDE_LENGHT * 4 + 4);
+			for &mag in &current_data.magnitudes {
+				fft_data.extend_from_slice(&mag.to_le_bytes());
+			}
+			fft_data.extend_from_slice(&current_data.dominant_frequency.to_le_bytes());
+			if ws.send(FrameType::Binary(false), &fft_data).is_err() {
+				info!("WebSocket client disconnected");
+				break;
+			}
 
-			resp.write(magnitudes_bytes)?;
-			resp.write(&dominant_freq_bytes)?;
-			Ok::<(), EspIOError>(())
-		})
-		.expect("Failed to register API handler");
+			// Send impulse data as JSON if new
+			if let Some(impulse) = &current_data.latest_impulse {
+				if last_impulse_timestamp != Some(impulse.timestamp) {
+					let peaks_json = impulse
+						.peaks
+						.iter()
+						.map(|peak| {
+							format!(
+								"{{\"index\":{},\"frequency\":{},\"magnitude\":{}}}",
+								peak.index, peak.frequency, peak.magnitude
+							)
+						})
+						.collect::<Vec<String>>()
+						.join(",");
+					let json = format!(
+						"{{\"timestamp\":{},\"dominantFrequency\":{},\"peaks\":[{}]}}",
+						impulse.timestamp, impulse.dominant_frequency, peaks_json
+					);
+					if ws.send(FrameType::Text(false), json.as_bytes()).is_err() {
+						info!("WebSocket client disconnected");
+						break;
+					}
+					last_impulse_timestamp = Some(impulse.timestamp);
+				}
+			}
 
-	info!("HTTP server started - Connect to http://192.168.71.1");
+			// Control update rate (~60 Hz)
+			std::thread::sleep(Duration::from_millis(8));
+		}
+		Ok::<(), EspIOError>(())
+	})?;
+
+	info!("HTTP and WebSocket server started - Connect to ws://192.168.71.1/ws");
 	Ok(server)
 }
 

@@ -25,6 +25,7 @@ struct FFTData {
 	magnitudes: [f32; FREQUENCY_MAGNITUDE_LENGHT],
 	dominant_frequency: f32,
 	is_recording: bool,
+	latest_impulse: Option<ImpulseData>,
 }
 
 fn main() -> Result<()> {
@@ -40,7 +41,7 @@ fn main() -> Result<()> {
 	let modem = peripherals.modem;
 
 	// Configure button pin as input with pull-down
-	let mut button = PinDriver::input(pins.gpio14.downgrade())?;
+	let mut button = PinDriver::input(pins.gpio0.downgrade())?;
 	button.set_pull(Pull::Down)?; // Configure with pull-down resistor
 
 	// Create shared state for FFT data with RwLock
@@ -53,6 +54,7 @@ fn main() -> Result<()> {
 		magnitudes: [0.0; FREQUENCY_MAGNITUDE_LENGHT],
 		dominant_frequency: 0.0,
 		is_recording: false,
+		latest_impulse: None,
 	})));
 
 	// Clone state for the Wi-Fi/server thread
@@ -71,10 +73,10 @@ fn main() -> Result<()> {
 	let mut i2s = I2sDriver::new_std_rx(
 		peripherals.i2s0,
 		&config,
-		pins.gpio25, // sck
-		pins.gpio26, // sd
+		pins.gpio4,  // sck
+		pins.gpio22, // sd
 		None::<AnyIOPin>,
-		pins.gpio27, // ws
+		pins.gpio21, // ws
 	)?;
 
 	// Enable I2S receiver
@@ -95,11 +97,12 @@ fn main() -> Result<()> {
 	let mut buffer: Vec<u8> = vec![0; FREQUENCY_MAGNITUDE_LENGHT];
 	let mut accumulated_buffer: Vec<u8> = vec![0; FFT_LENGTH_BYTES];
 	let mut acc_index = 0;
-	let timeout = 100;
+	let timeout = 16;
 
 	// Main FFT loop
 	loop {
 		let is_button_pressed = button.get_level() == Level::High;
+		// let is_button_pressed = true;
 
 		// Update recording state in shared data
 		let current_state = {
@@ -126,6 +129,7 @@ fn main() -> Result<()> {
 				magnitudes: current_state.magnitudes,
 				dominant_frequency: current_state.dominant_frequency,
 				is_recording: is_button_pressed,
+				latest_impulse: None,
 			});
 		}
 
@@ -208,10 +212,80 @@ fn main() -> Result<()> {
 					0.0
 				};
 
+				// Impulse detection logic
+				static mut PREV_MAGNITUDE_SUM: f32 = 0.0;
+				static mut LAST_IMPULSE_TIME: u64 = 0;
+
+				let magnitude_sum: f32 = magnitudes.iter().sum();
+				let now: u64 = unsafe { esp_idf_svc::sys::esp_timer_get_time() as u64 / 1000 }; // Convert to ms
+				let delta = (magnitude_sum - unsafe { PREV_MAGNITUDE_SUM }).abs();
+
+				unsafe {
+					PREV_MAGNITUDE_SUM = magnitude_sum;
+				}
+
+				let mut detected_impulse = None;
+
+				// Check if this is an impulse (sudden change in magnitude)
+				if delta > IMPULSE_THRESHOLD
+					&& now - unsafe { LAST_IMPULSE_TIME } > IMPULSE_TIME_THRESHOLD
+					&& frequency > 100.0
+				// No impulse below 100hz is required as the coconut is giving impulse at and above 100Hz.
+				{
+					unsafe {
+						LAST_IMPULSE_TIME = now;
+					}
+
+					// Find additional peaks around dominant frequency
+					let peak_indices = find_peaks(&magnitudes, max_index);
+
+					// Create peak data
+					let peaks = peak_indices
+						.iter()
+						.map(|&idx| PeakData {
+							index: idx,
+							frequency: idx as f32 * FREQ_BIN_WIDTH,
+							magnitude: magnitudes[idx],
+						})
+						.collect();
+
+					// Create impulse data
+					detected_impulse = Some(ImpulseData {
+						timestamp: now,
+						dominant_frequency: frequency,
+						peaks,
+					});
+
+					info!(
+						"Impulse detected at {} ms, dominant frequency: {:.2} Hz",
+						now, frequency
+					);
+
+					// Classify coconut type based on dominant frequency
+					let coconut_type = if (2000.0..=2500.0).contains(&frequency) {
+						"BROWN COCONUT"
+					} else if (750.0..=890.0).contains(&frequency) {
+						"FLESHY COCONUT"
+					} else if (900.0..=1400.0).contains(&frequency) {
+						"WATER COCONUT"
+					} else {
+						"UNKNOWN"
+					};
+
+					// Log the coconut type if it's identified
+					if coconut_type != "UNKNOWN" {
+						info!(
+							"COCONUT TYPE DETECTED: {} (Frequency: {:.2} Hz)",
+							coconut_type, frequency
+						);
+					}
+				}
+
 				let updated_fft_data: Arc<FFTData> = Arc::new(FFTData {
 					magnitudes,
 					dominant_frequency: frequency,
 					is_recording: true,
+					latest_impulse: detected_impulse,
 				});
 
 				// info!("Updated FFT data, dominant frequency: {:.2} Hz", frequency); // Uncomment to print dominant freq. to console
@@ -224,7 +298,54 @@ fn main() -> Result<()> {
 			}
 		} else {
 			// Small delay to avoid busy-waiting when not recording
-			std::thread::sleep(std::time::Duration::from_millis(50));
+			std::thread::sleep(std::time::Duration::from_millis(8));
 		}
 	}
+}
+
+fn find_peaks(magnitudes: &[f32; FREQUENCY_MAGNITUDE_LENGHT], dominant_index: usize) -> Vec<usize> {
+	let mut result = vec![dominant_index];
+	let range = 5; // 5 peaks before and after
+
+	// Find local maxima before dominant peak
+	let start_index = (dominant_index as i32 - 25).max(0) as usize;
+	for _ in 0..range {
+		let mut max_idx = start_index;
+		let mut max_val = f32::NEG_INFINITY;
+
+		(start_index..dominant_index).for_each(|j| {
+			if magnitudes[j] > max_val && !result.contains(&j) {
+				max_val = magnitudes[j];
+				max_idx = j;
+			}
+		});
+
+		if max_val > 0.0 {
+			result.push(max_idx);
+		}
+	}
+
+	// Find local maxima after dominant peak
+	let end_index = (dominant_index + 25).min(FREQUENCY_MAGNITUDE_LENGHT - 1);
+	let mut current_idx = dominant_index;
+	for _ in 0..range {
+		let mut max_idx = current_idx;
+		let mut max_val = f32::NEG_INFINITY;
+
+		(current_idx + 1..=end_index).for_each(|j| {
+			if magnitudes[j] > max_val && !result.contains(&j) {
+				max_val = magnitudes[j];
+				max_idx = j;
+			}
+		});
+
+		if max_idx > current_idx && max_val > 0.0 {
+			result.push(max_idx);
+			current_idx = max_idx;
+		}
+	}
+
+	// Sort by frequency (index)
+	result.sort();
+	result
 }

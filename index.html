@@ -315,33 +315,164 @@
 
 			ws.onmessage = function (event) {
 				if (event.data instanceof ArrayBuffer) {
-					// FFT data (binary)
 					const buffer = event.data;
-					const floatArray = new Float32Array(buffer, 0, FREQUENCY_MAGNITUDE_LENGHT);
-					const dominantFreq = new Float32Array(
-						buffer,
-						FREQUENCY_MAGNITUDE_LENGHT * 4,
-						1,
-					)[0];
-					updateSpectrum(floatArray, dominantFreq);
-				} else if (event.data instanceof Blob) {
-					// Handle binary data that comes as Blob
-					event.data.arrayBuffer().then((buffer) => {
-						const floatArray = new Float32Array(buffer, 0, FREQUENCY_MAGNITUDE_LENGHT);
+					const dataView = new DataView(buffer);
+
+					// Check the header byte to determine the message type
+					const messageType = dataView.getUint8(0);
+
+					if (messageType === 0x01) {
+						// FFT data
+						const floatArray = new Float32Array(
+							buffer.slice(1),
+							0,
+							FREQUENCY_MAGNITUDE_LENGHT,
+						);
 						const dominantFreq = new Float32Array(
-							buffer,
-							FREQUENCY_MAGNITUDE_LENGHT * 4,
+							buffer.slice(1 + FREQUENCY_MAGNITUDE_LENGHT * 4),
+							0,
 							1,
 						)[0];
 						updateSpectrum(floatArray, dominantFreq);
-					});
-				} else {
-					// Impulse data (JSON text)
-					try {
-						const data = JSON.parse(event.data);
-						if (data.status !== "no_impulse" && data.dominantFrequency > 0) {
-							const timestamp = new Date(data.timestamp).toLocaleTimeString();
-							const peaksFormatted = data.peaks
+					} else if (messageType === 0x02) {
+						// Impulse data
+						let offset = 1; // Skip header byte
+
+						// Extract timestamp (8 bytes)
+						const timestamp =
+							dataView.getUint32(offset, true) +
+							dataView.getUint32(offset + 4, true) * 4294967296; // Handle 64-bit
+						offset += 8;
+
+						// Extract dominant frequency (4 bytes)
+						const dominantFrequency = dataView.getFloat32(offset, true);
+						offset += 4;
+
+						// Extract peak count (1 byte)
+						const peakCount = dataView.getUint8(offset);
+						offset += 1;
+
+						// Extract peaks
+						const peaks = [];
+						for (let i = 0; i < peakCount; i++) {
+							const index = dataView.getUint16(offset, true);
+							offset += 2;
+
+							const frequency = dataView.getFloat32(offset, true);
+							offset += 4;
+
+							const magnitude = dataView.getFloat32(offset, true);
+							offset += 4;
+
+							peaks.push({ index, frequency, magnitude });
+						}
+
+						// Extract coconut type string
+						const coconutTypeLength = dataView.getUint8(offset);
+						offset += 1;
+
+						const coconutTypeBytes = new Uint8Array(
+							buffer.slice(offset, offset + coconutTypeLength),
+						);
+						const coconutType = new TextDecoder().decode(coconutTypeBytes);
+
+						// Process impulse data
+						const date = new Date();
+						const formattedTimestamp = date.toLocaleTimeString();
+
+						const peaksFormatted = peaks
+							.map(
+								(peak) =>
+									`${peak.frequency.toFixed(1)} Hz (${peak.magnitude.toFixed(4)})`,
+							)
+							.join(", ");
+
+						// Update the coconut type
+						if (coconutType) {
+							coconutTypeElement.textContent = coconutType;
+						}
+
+						const entry = document.createElement("div");
+						entry.className = "impulse-entry";
+						entry.innerHTML = `
+                <div class="impulse-time">${formattedTimestamp}</div>
+                <div class="impulse-freq">Dominant: ${dominantFrequency.toFixed(1)} Hz</div>
+                <div class="impulse-data">Peaks: ${peaksFormatted}</div>
+                <div class="impulse-data">Type: ${coconutType || "Unknown"}</div>
+            `;
+
+						impulseLogElement.prepend(entry);
+						while (impulseLogElement.children.length > maxLogEntries) {
+							impulseLogElement.removeChild(impulseLogElement.lastChild);
+						}
+						lastImpulseElement.textContent = formattedTimestamp;
+					}
+				} else if (event.data instanceof Blob) {
+					// Handle binary data that comes as Blob
+					event.data.arrayBuffer().then((buffer) => {
+						const dataView = new DataView(buffer);
+						const messageType = dataView.getUint8(0);
+
+						if (messageType === 0x01) {
+							// FFT data
+							const floatArray = new Float32Array(
+								buffer.slice(1),
+								0,
+								FREQUENCY_MAGNITUDE_LENGHT,
+							);
+							const dominantFreq = new Float32Array(
+								buffer.slice(1 + FREQUENCY_MAGNITUDE_LENGHT * 4),
+								0,
+								1,
+							)[0];
+							updateSpectrum(floatArray, dominantFreq);
+						} else if (messageType === 0x02) {
+							// Process impulse data
+							let offset = 1; // Skip header byte
+
+							// Extract timestamp (8 bytes)
+							const timestamp =
+								dataView.getUint32(offset, true) +
+								dataView.getUint32(offset + 4, true) * 4294967296; // Handle 64-bit
+							offset += 8;
+
+							// Extract dominant frequency (4 bytes)
+							const dominantFrequency = dataView.getFloat32(offset, true);
+							offset += 4;
+
+							// Extract peak count (1 byte)
+							const peakCount = dataView.getUint8(offset);
+							offset += 1;
+
+							// Extract peaks
+							const peaks = [];
+							for (let i = 0; i < peakCount; i++) {
+								const index = dataView.getUint16(offset, true);
+								offset += 2;
+
+								const frequency = dataView.getFloat32(offset, true);
+								offset += 4;
+
+								const magnitude = dataView.getFloat32(offset, true);
+								offset += 4;
+
+								peaks.push({ index, frequency, magnitude });
+							}
+
+							// Extract coconut type string
+							const coconutTypeLength = dataView.getUint8(offset);
+							offset += 1;
+
+							const coconutTypeBytes = new Uint8Array(
+								buffer.slice(offset, offset + coconutTypeLength),
+							);
+							const coconutType = new TextDecoder().decode(coconutTypeBytes);
+
+							// Process impulse data
+							const date = new Date();
+							const formattedTimestamp = date.toLocaleTimeString();
+
+							const peaksFormatted = peaks
 								.map(
 									(peak) =>
 										`${peak.frequency.toFixed(1)} Hz (${peak.magnitude.toFixed(4)})`,
@@ -349,28 +480,26 @@
 								.join(", ");
 
 							// Update the coconut type
-							if (data.coconutType) {
-								coconutTypeElement.textContent = data.coconutType;
+							if (coconutType) {
+								coconutTypeElement.textContent = coconutType;
 							}
 
 							const entry = document.createElement("div");
 							entry.className = "impulse-entry";
 							entry.innerHTML = `
-						        <div class="impulse-time">${timestamp}</div>
-						        <div class="impulse-freq">Dominant: ${data.dominantFrequency.toFixed(1)} Hz</div>
-						        <div class="impulse-data">Peaks: ${peaksFormatted}</div>
-						        <div class="impulse-data">Type: ${data.coconutType || "Unknown"}</div>
-						    `;
+                    <div class="impulse-time">${formattedTimestamp}</div>
+                    <div class="impulse-freq">Dominant: ${dominantFrequency.toFixed(1)} Hz</div>
+                    <div class="impulse-data">Peaks: ${peaksFormatted}</div>
+                    <div class="impulse-data">Type: ${coconutType || "Unknown"}</div>
+                `;
 
 							impulseLogElement.prepend(entry);
 							while (impulseLogElement.children.length > maxLogEntries) {
 								impulseLogElement.removeChild(impulseLogElement.lastChild);
 							}
-							lastImpulseElement.textContent = timestamp;
+							lastImpulseElement.textContent = formattedTimestamp;
 						}
-					} catch (e) {
-						console.error("Error parsing WebSocket message:", e, event.data);
-					}
+					});
 				}
 			};
 

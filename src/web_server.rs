@@ -92,30 +92,54 @@ pub fn init_http_server(server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<EspHt
 				fft_data.extend_from_slice(&mag.to_le_bytes());
 			}
 			fft_data.extend_from_slice(&current_data.dominant_frequency.to_le_bytes());
-			if ws.send(FrameType::Binary(false), &fft_data).is_err() {
+
+			// Add a header byte to indicate this is FFT data (e.g., 0x01)
+			let mut message = vec![0x01];
+			message.extend_from_slice(&fft_data);
+
+			if ws.send(FrameType::Binary(false), &message).is_err() {
 				info!("WebSocket client disconnected");
 				break;
 			}
 
-			// Send impulse data as JSON if new
+			// Send impulse data as binary if new
 			if let Some(impulse) = &current_data.latest_impulse {
 				if last_impulse_timestamp != Some(impulse.timestamp) {
-					let peaks_json = impulse
-						.peaks
-						.iter()
-						.map(|peak| {
-							format!(
-								"{{\"index\":{},\"frequency\":{},\"magnitude\":{}}}",
-								peak.index, peak.frequency, peak.magnitude
-							)
-						})
-						.collect::<Vec<String>>()
-						.join(",");
-					let json = format!(
-					    "{{\"timestamp\":{},\"dominantFrequency\":{},\"peaks\":[{}],\"coconutType\":\"{}\"}}",
-					    impulse.timestamp, impulse.dominant_frequency, peaks_json, impulse.coconut_type
-					);
-					if ws.send(FrameType::Text(false), json.as_bytes()).is_err() {
+					// Create binary message for impulse data
+					let mut impulse_data = Vec::new();
+
+					// Add a header byte to indicate this is impulse data (e.g., 0x02)
+					impulse_data.push(0x02);
+
+					// Add timestamp (8 bytes)
+					impulse_data.extend_from_slice(&impulse.timestamp.to_le_bytes());
+
+					// Add dominant frequency (4 bytes)
+					impulse_data.extend_from_slice(&impulse.dominant_frequency.to_le_bytes());
+
+					// Add number of peaks (1 byte should be enough)
+					impulse_data.push(impulse.peaks.len() as u8);
+
+					// Add each peak data
+					for peak in &impulse.peaks {
+						// Add index (2 bytes should be enough)
+						impulse_data.extend_from_slice(&(peak.index as u16).to_le_bytes());
+
+						// Add frequency (4 bytes)
+						impulse_data.extend_from_slice(&peak.frequency.to_le_bytes());
+
+						// Add magnitude (4 bytes)
+						impulse_data.extend_from_slice(&peak.magnitude.to_le_bytes());
+					}
+
+					// Add coconut type string length (1 byte)
+					let coconut_type_bytes = impulse.coconut_type.as_bytes();
+					impulse_data.push(coconut_type_bytes.len() as u8);
+
+					// Add coconut type string
+					impulse_data.extend_from_slice(coconut_type_bytes);
+
+					if ws.send(FrameType::Binary(false), &impulse_data).is_err() {
 						info!("WebSocket client disconnected");
 						break;
 					}

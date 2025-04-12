@@ -229,6 +229,7 @@ fn main() -> Result<()> {
 				// Check if this is an impulse (sudden change in magnitude)
 				if delta > IMPULSE_THRESHOLD
 					&& now - unsafe { LAST_IMPULSE_TIME } > IMPULSE_TIME_THRESHOLD
+					&& frequency > 0.0
 				{
 					unsafe {
 						LAST_IMPULSE_TIME = now;

@@ -306,7 +306,7 @@
 				fetch("/api/latest_impulse")
 					.then((response) => response.json())
 					.then((data) => {
-						if (data.status !== "no_impulse") {
+						if (data.status !== "no_impulse" && data.dominantFrequency > 0) {
 							// Format the timestamp
 							const timestamp = new Date().toLocaleTimeString();
 
@@ -341,9 +341,6 @@
 						}
 					})
 					.catch((error) => console.error("Error fetching impulse data:", error));
-
-				// Poll for new impulses every second
-				setTimeout(fetchImpulseData, 1000);
 			}
 			// Function to fetch FFT data and update spectrum
 			function fetchFFTData() {
@@ -360,6 +357,9 @@
 
 						// Update the spectrum visualization
 						updateSpectrum(floatArray, dominantFreq);
+
+						// Also fetch impulse data
+						// fetchImpulseData();
 					})
 					.catch((error) => console.error("Error fetching FFT data:", error));
 
@@ -367,8 +367,6 @@
 				setTimeout(fetchFFTData, 16.67); // ~60fps
 			}
 
-			// Start fetching impulse data
-			fetchImpulseData();
 			fetchFFTData();
 		</script>
 	</body>

@@ -23,7 +23,7 @@ pub const AMPLITUDE_THRESHOLD: AmplitudeThreshold = AmplitudeThreshold {
 	high_freq_threshold: 0.001, // For ≥frequency_cutoff (keep between 0.05 to 0.005)
 };
 
-pub const IMPULSE_THRESHOLD: f32 = 0.001;
+pub const IMPULSE_THRESHOLD: f32 = 0.0012;
 pub const IMPULSE_TIME_THRESHOLD: u64 = 100; // ms
 
 pub static WIFI_SSID: &str = "ESP32-FFT-Analyzer";

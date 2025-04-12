@@ -23,6 +23,9 @@ pub const AMPLITUDE_THRESHOLD: AmplitudeThreshold = AmplitudeThreshold {
 	high_freq_threshold: 0.001, // For ≥frequency_cutoff (keep between 0.05 to 0.005)
 };
 
+pub const IMPULSE_THRESHOLD: f32 = 0.01;
+pub const IMPULSE_TIME_THRESHOLD: u64 = 100; // ms
+
 pub static WIFI_SSID: &str = "ESP32-FFT-Analyzer";
 
 pub const WIFI_PASSWORD: &str = "spectrum123";
@@ -31,4 +34,16 @@ pub struct AmplitudeThreshold {
 	pub frequency_cutoff: f32,
 	pub low_freq_threshold: f32,
 	pub high_freq_threshold: f32,
+}
+
+pub struct ImpulseData {
+	pub timestamp: u64,
+	pub dominant_frequency: f32,
+	pub peaks: Vec<PeakData>,
+}
+
+pub struct PeakData {
+	pub index: usize,
+	pub frequency: f32,
+	pub magnitude: f32,
 }

@@ -22,6 +22,7 @@
 				display: grid;
 				grid-template-rows: auto 1fr auto;
 				gap: 10px;
+				overflow: hidden;
 			}
 			h1 {
 				color: #4caf50;
@@ -58,6 +59,7 @@
 				display: flex;
 				height: 100%;
 				gap: 10px;
+				overflow: hidden;
 			}
 
 			/* canvas {
@@ -73,7 +75,7 @@
 				background-color: #111;
 				border-radius: 5px;
 				padding: 10px;
-				overflow-y: auto;
+				overflow: hidden;
 				display: flex;
 				flex-direction: column;
 			}
@@ -245,9 +247,6 @@
 				// Clear and redraw the background
 				drawFrequencyScale();
 
-				// Add impulse detection
-				detectImpulse(magnitudes, dominantFrequency);
-
 				// Smooth the magnitudes with a moving average
 				let smoothed_magnitudes = [];
 				for (let i = 0; i < magnitudes.length; i++) {
@@ -302,167 +301,74 @@
 				}
 			}
 
-			function detectImpulse(magnitudes, dominantFrequency) {
-				const now = performance.now();
-				const magnitudeSum = magnitudes.reduce((sum, val) => sum + val, 0);
-				const delta = Math.abs(magnitudeSum - prevMagnitudeSum);
-				prevMagnitudeSum = magnitudeSum;
+			// Replace the existing impulse detection code with this:
+			function fetchImpulseData() {
+				fetch("/api/latest_impulse")
+					.then((response) => response.json())
+					.then((data) => {
+						if (data.status !== "no_impulse") {
+							// Format the timestamp
+							const timestamp = new Date().toLocaleTimeString();
 
-				// Check if this is an impulse (sudden change in magnitude)
-				if (delta > impulseThreshold && now - lastImpulseTime > impulseTimeThreshold) {
-					lastImpulseTime = now;
+							// Format peak data for display
+							const peaksFormatted = data.peaks
+								.map(
+									(peak) =>
+										`${peak.frequency.toFixed(1)} Hz (${peak.magnitude.toFixed(4)})`,
+								)
+								.join(", ");
 
-					// Find dominant frequency index
-					let maxIndex = 0;
-					let maxValue = 0;
+							// Create the entry
+							const entry = document.createElement("div");
+							entry.className = "impulse-entry";
 
-					for (let i = 0; i < magnitudes.length; i++) {
-						if (magnitudes[i] > maxValue) {
-							maxValue = magnitudes[i];
-							maxIndex = i;
-						}
-					}
-
-					// Get dominant frequency and surrounding peaks
-					const dominantFreqIndex = maxIndex;
-					const peakIndices = findPeaks(magnitudes, dominantFreqIndex);
-
-					// Create frequency data for each peak
-					const freqData = peakIndices.map((idx) => {
-						return {
-							index: idx,
-							frequency: idx * (SAMPLING_RATE / FFT_LENGTH),
-							magnitude: magnitudes[idx],
-						};
-					});
-
-					// Log the impulse
-					logImpulse(dominantFrequency, freqData);
-
-					// Send impulse data to server for processing/storage
-					sendImpulseData(dominantFrequency, freqData);
-
-					return true;
-				}
-				return false;
-			}
-
-			// Find peaks around dominant frequency
-			function findPeaks(magnitudes, dominantIndex) {
-				const result = [dominantIndex];
-				const range = 5; // 5 peaks before and after
-
-				// Find local maxima before dominant peak
-				let startIndex = Math.max(0, dominantIndex - 25); // Search window
-				for (let i = 0; i < range; i++) {
-					let maxIdx = startIndex;
-					let maxVal = -Infinity;
-
-					for (let j = startIndex; j < dominantIndex; j++) {
-						if (magnitudes[j] > maxVal && !result.includes(j)) {
-							maxVal = magnitudes[j];
-							maxIdx = j;
-						}
-					}
-
-					if (maxVal > 0) {
-						result.push(maxIdx);
-						startIndex = maxIdx + 1;
-					}
-				}
-
-				// Find local maxima after dominant peak
-				let endIndex = Math.min(magnitudes.length - 1, dominantIndex + 25); // Search window
-				for (let i = 0; i < range; i++) {
-					let maxIdx = dominantIndex;
-					let maxVal = -Infinity;
-
-					for (let j = dominantIndex + 1; j <= endIndex; j++) {
-						if (magnitudes[j] > maxVal && !result.includes(j)) {
-							maxVal = magnitudes[j];
-							maxIdx = j;
-						}
-					}
-
-					if (maxIdx > dominantIndex && maxVal > 0) {
-						result.push(maxIdx);
-						dominantIndex = maxIdx;
-					}
-				}
-
-				// Sort by frequency
-				return result.sort((a, b) => a - b);
-			}
-
-			// Log impulse to the UI
-			function logImpulse(dominantFrequency, peakData) {
-				const timestamp = new Date().toLocaleTimeString();
-				const entry = document.createElement("div");
-				entry.className = "impulse-entry";
-
-				// Format peak data for display
-				const peaksFormatted = peakData
-					.map((peak) => `${peak.frequency.toFixed(1)} Hz (${peak.magnitude.toFixed(4)})`)
-					.join(", ");
-
-				entry.innerHTML = `
+							entry.innerHTML = `
                     <div class="impulse-time">${timestamp}</div>
-                    <div class="impulse-freq">Dominant: ${dominantFrequency.toFixed(1)} Hz</div>
+                    <div class="impulse-freq">Dominant: ${data.dominantFrequency.toFixed(1)} Hz</div>
                     <div class="impulse-data">Peaks: ${peaksFormatted}</div>
                 `;
 
-				// Add to log and scroll to bottom
-				impulseLogElement.prepend(entry);
+							// Add to log and scroll to bottom
+							impulseLogElement.prepend(entry);
 
-				// Limit number of log entries
-				while (impulseLogElement.children.length > maxLogEntries) {
-					impulseLogElement.removeChild(impulseLogElement.lastChild);
-				}
+							// Limit number of log entries
+							while (impulseLogElement.children.length > maxLogEntries) {
+								impulseLogElement.removeChild(impulseLogElement.lastChild);
+							}
 
-				// Update last impulse display
-				lastImpulseElement.textContent = timestamp;
+							// Update last impulse display
+							lastImpulseElement.textContent = timestamp;
+						}
+					})
+					.catch((error) => console.error("Error fetching impulse data:", error));
+
+				// Poll for new impulses every second
+				setTimeout(fetchImpulseData, 1000);
+			}
+			// Function to fetch FFT data and update spectrum
+			function fetchFFTData() {
+				fetch("/api/fft")
+					.then((response) => response.arrayBuffer())
+					.then((buffer) => {
+						// Extract magnitudes and dominant frequency from binary data
+						const floatArray = new Float32Array(buffer, 0, FREQUENCY_MAGNITUDE_LENGHT);
+						const dominantFreq = new Float32Array(
+							buffer,
+							FREQUENCY_MAGNITUDE_LENGHT * 4,
+							1,
+						)[0];
+
+						// Update the spectrum visualization
+						updateSpectrum(floatArray, dominantFreq);
+					})
+					.catch((error) => console.error("Error fetching FFT data:", error));
+
+				// Poll for new FFT data (adjust the interval as needed)
+				setTimeout(fetchFFTData, 16.67); // ~60fps
 			}
 
-			// Send impulse data to server (implement in web_server.rs)
-			function sendImpulseData(dominantFrequency, peakData) {
-				fetch("/api/impulse", {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-					},
-					body: JSON.stringify({
-						timestamp: Date.now(),
-						dominantFrequency,
-						peaks: peakData,
-					}),
-				}).catch((error) => console.error("Error sending impulse data:", error));
-			}
-
-			// Function to fetch FFT data
-			async function fetchFFTData() {
-				try {
-					// Fetch the binary data from the /api/fft endpoint
-					const response = await fetch("/api/fft");
-					const arrayBuffer = await response.arrayBuffer();
-
-					// Convert the ArrayBuffer to a Float32Array
-					const floatArray = new Float32Array(arrayBuffer);
-
-					// Extract magnitudes and dominant frequency
-					const magnitudes = floatArray.slice(0, FREQUENCY_MAGNITUDE_LENGHT);
-					const dominantFrequency = floatArray[FREQUENCY_MAGNITUDE_LENGHT];
-
-					// Update the spectrum visualization
-					updateSpectrum(magnitudes, dominantFrequency);
-				} catch (error) {
-					console.error("Error fetching FFT data:", error);
-				}
-
-				// Schedule the next fetch (adjust timing for desired fps, e.g., 33.33ms ~ 30 fps)
-				setTimeout(fetchFFTData, 33.33);
-			}
-
-			// Start fetching data
+			// Start fetching impulse data
+			fetchImpulseData();
 			fetchFFTData();
 		</script>
 	</body>

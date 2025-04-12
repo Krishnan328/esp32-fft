@@ -1,6 +1,5 @@
 use anyhow::Result;
 use esp_idf_hal::modem::Modem;
-use esp_idf_svc::http::Method;
 use esp_idf_svc::{
 	eventloop::EspSystemEventLoop,
 	http::server::{Configuration, EspHttpServer},

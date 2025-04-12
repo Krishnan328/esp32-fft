@@ -279,7 +279,7 @@ fn main() -> Result<()> {
 			}
 		} else {
 			// Small delay to avoid busy-waiting when not recording
-			std::thread::sleep(std::time::Duration::from_millis(16));
+			std::thread::sleep(std::time::Duration::from_millis(8));
 		}
 	}
 }

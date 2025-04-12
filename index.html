@@ -301,16 +301,41 @@
 				}
 			}
 
-			// Replace the existing impulse detection code with this:
-			function fetchImpulseData() {
-				fetch("/api/latest_impulse")
-					.then((response) => response.json())
-					.then((data) => {
-						if (data.status !== "no_impulse" && data.dominantFrequency > 0) {
-							// Format the timestamp
-							const timestamp = new Date().toLocaleTimeString();
+			// Establish WebSocket connection
+			const ws = new WebSocket("ws://192.168.71.1/ws");
 
-							// Format peak data for display
+			ws.onopen = function () {
+				console.log("WebSocket connection established");
+			};
+
+			ws.onmessage = function (event) {
+				if (event.data instanceof ArrayBuffer) {
+					// FFT data (binary)
+					const buffer = event.data;
+					const floatArray = new Float32Array(buffer, 0, FREQUENCY_MAGNITUDE_LENGHT);
+					const dominantFreq = new Float32Array(
+						buffer,
+						FREQUENCY_MAGNITUDE_LENGHT * 4,
+						1,
+					)[0];
+					updateSpectrum(floatArray, dominantFreq);
+				} else if (event.data instanceof Blob) {
+					// Handle binary data that comes as Blob
+					event.data.arrayBuffer().then((buffer) => {
+						const floatArray = new Float32Array(buffer, 0, FREQUENCY_MAGNITUDE_LENGHT);
+						const dominantFreq = new Float32Array(
+							buffer,
+							FREQUENCY_MAGNITUDE_LENGHT * 4,
+							1,
+						)[0];
+						updateSpectrum(floatArray, dominantFreq);
+					});
+				} else {
+					// Impulse data (JSON text)
+					try {
+						const data = JSON.parse(event.data);
+						if (data.status !== "no_impulse" && data.dominantFrequency > 0) {
+							const timestamp = new Date(data.timestamp).toLocaleTimeString();
 							const peaksFormatted = data.peaks
 								.map(
 									(peak) =>
@@ -318,56 +343,33 @@
 								)
 								.join(", ");
 
-							// Create the entry
 							const entry = document.createElement("div");
 							entry.className = "impulse-entry";
-
 							entry.innerHTML = `
                     <div class="impulse-time">${timestamp}</div>
                     <div class="impulse-freq">Dominant: ${data.dominantFrequency.toFixed(1)} Hz</div>
                     <div class="impulse-data">Peaks: ${peaksFormatted}</div>
                 `;
 
-							// Add to log and scroll to bottom
 							impulseLogElement.prepend(entry);
-
-							// Limit number of log entries
 							while (impulseLogElement.children.length > maxLogEntries) {
 								impulseLogElement.removeChild(impulseLogElement.lastChild);
 							}
-
-							// Update last impulse display
 							lastImpulseElement.textContent = timestamp;
 						}
-					})
-					.catch((error) => console.error("Error fetching impulse data:", error));
-			}
-			// Function to fetch FFT data and update spectrum
-			function fetchFFTData() {
-				fetch("/api/fft")
-					.then((response) => response.arrayBuffer())
-					.then((buffer) => {
-						// Extract magnitudes and dominant frequency from binary data
-						const floatArray = new Float32Array(buffer, 0, FREQUENCY_MAGNITUDE_LENGHT);
-						const dominantFreq = new Float32Array(
-							buffer,
-							FREQUENCY_MAGNITUDE_LENGHT * 4,
-							1,
-						)[0];
+					} catch (e) {
+						console.error("Error parsing WebSocket message:", e, event.data);
+					}
+				}
+			};
 
-						// Update the spectrum visualization
-						updateSpectrum(floatArray, dominantFreq);
+			ws.onerror = function (error) {
+				console.error("WebSocket error:", error);
+			};
 
-						// Also fetch impulse data
-						fetchImpulseData();
-					})
-					.catch((error) => console.error("Error fetching FFT data:", error));
-
-				// Poll for new FFT data (adjust the interval as needed)
-				setTimeout(fetchFFTData, 16.67); // ~60fps
-			}
-
-			fetchFFTData();
+			ws.onclose = function () {
+				console.log("WebSocket connection closed");
+			};
 		</script>
 	</body>
 </html>

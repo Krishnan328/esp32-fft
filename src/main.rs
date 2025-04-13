@@ -104,7 +104,7 @@ fn main() -> Result<()> {
 	let mut buffer: Vec<u8> = vec![0; FREQUENCY_MAGNITUDE_LENGHT];
 	let mut accumulated_buffer: Vec<u8> = vec![0; FFT_LENGTH_BYTES];
 	let mut acc_index = 0;
-	let timeout = AUDIO_UPDATE_PER_SECOND as u32;
+	let timeout = AUDIO_SAMPLE_PER_SECOND as u32;
 
 	// Main FFT loop
 	loop {
@@ -256,10 +256,10 @@ fn main() -> Result<()> {
 						})
 						.collect();
 
-					info!(
-						"Impulse detected at {} ms, dominant frequency: {:.2} Hz",
-						now, frequency
-					);
+					// info!(
+					// 	"Impulse detected at {} ms, dominant frequency: {:.2} Hz",
+					// 	now, frequency
+					// );
 
 					// Classify coconut type based on dominant frequency
 					let coconut_type = if (1900.0..=2800.0).contains(&frequency) {
@@ -273,12 +273,12 @@ fn main() -> Result<()> {
 					};
 
 					// Log the coconut type if it's identified
-					if coconut_type != "UNKNOWN" {
-						info!(
-							"COCONUT TYPE DETECTED: {} (Frequency: {:.2} Hz)",
-							coconut_type, frequency
-						);
-					}
+					// if coconut_type != "UNKNOWN" {
+					// 	info!(
+					// 		"COCONUT TYPE DETECTED: {} (Frequency: {:.2} Hz)",
+					// 		coconut_type, frequency
+					// 	);
+					// }
 
 					// Create impulse data
 					detected_impulse = Some(ImpulseData {
@@ -306,7 +306,7 @@ fn main() -> Result<()> {
 			}
 		} else {
 			// Small delay to avoid busy-waiting when not recording
-			std::thread::sleep(std::time::Duration::from_millis(AUDIO_UPDATE_PER_SECOND));
+			std::thread::sleep(std::time::Duration::from_millis(AUDIO_SAMPLE_PER_SECOND));
 		}
 	}
 }

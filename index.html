@@ -5,118 +5,185 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>ESP32 FFT Spectrum Analyzer</title>
 		<style>
+			:root {
+				--primary: #4ade80;
+				--primary-dark: #22c55e;
+				--bg-dark: #111827;
+				--bg-darker: #0a0f1a;
+				--text: #f3f4f6;
+				--text-secondary: #9ca3af;
+				--grid-lines: rgba(75, 85, 99, 0.3);
+				--panel-bg: rgba(31, 41, 55, 0.7);
+				--highlight: rgba(74, 222, 128, 0.15);
+			}
+
 			body {
-				font-family: Arial, sans-serif;
+				font-family:
+					"Inter",
+					"Segoe UI",
+					system-ui,
+					-apple-system,
+					sans-serif;
 				margin: 0;
 				padding: 0;
 				height: 100vh;
 				display: flex;
 				justify-content: center;
 				align-items: center;
-				background-color: #222;
-				color: #eee;
+				background-color: var(--bg-dark);
+				color: var(--text);
+				line-height: 1.5;
 			}
+
 			.container {
-				width: 90vw;
-				height: 90vh;
+				width: 95vw;
+				height: 95vh;
 				display: grid;
 				grid-template-rows: auto 1fr auto;
-				gap: 10px;
-				overflow: hidden;
-			}
-			h1 {
-				color: #4caf50;
-				text-align: center;
-			}
-			canvas {
-				flex: 3;
-				width: 100%;
-				height: 100%;
-				background-color: #000;
-				border-radius: 5px;
-			}
-			.info {
-				display: flex;
-				justify-content: space-between;
-				width: 100%;
-			}
-			.info div {
-				background-color: #333;
-				padding: 10px;
-				border-radius: 5px;
-				flex: 1;
-				margin: 0 5px;
-				text-align: center;
-			}
-			.info span {
-				font-size: 24px;
-				color: #4caf50;
-				display: block;
-				margin-top: 5px;
-			}
-			/* Add to the style section */
-			.main-content {
-				display: flex;
-				height: 100%;
-				gap: 10px;
+				gap: 20px;
 				overflow: hidden;
 			}
 
-			/* canvas {
-                flex: 3;
-                height: 100%;
-                background-color: #000;
-                border-radius: 5px;
-            } */
+			h1 {
+				color: var(--primary);
+				text-align: center;
+				margin: 0.5rem 0;
+				font-weight: 600;
+				font-size: 1.75rem;
+			}
+
+			.main-content {
+				display: flex;
+				height: 100%;
+				gap: 20px;
+				overflow: hidden;
+			}
+
+			canvas {
+				flex: 3;
+				height: 100%;
+				background-color: var(--bg-darker);
+				border-radius: 12px;
+				box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+			}
 
 			.log-window {
 				flex: 1;
 				height: 100%;
-				background-color: #111;
-				border-radius: 5px;
-				padding: 10px;
+				background-color: var(--bg-darker);
+				border-radius: 12px;
+				padding: 16px;
 				overflow: hidden;
 				display: flex;
 				flex-direction: column;
+				box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 			}
 
 			.log-window h3 {
 				margin-top: 0;
-				color: #4caf50;
+				color: var(--primary);
 				text-align: center;
-				border-bottom: 1px solid #333;
-				padding-bottom: 5px;
+				border-bottom: 1px solid var(--grid-lines);
+				padding-bottom: 10px;
+				font-weight: 500;
 			}
 
 			#impulseLog {
 				overflow-y: auto;
 				flex-grow: 1;
-				font-family: monospace;
-				font-size: 12px;
+				font-family: "Fira Code", "Cascadia Code", monospace;
+				font-size: 13px;
+				padding-right: 10px;
 			}
 
 			.impulse-entry {
-				margin-bottom: 10px;
-				padding: 5px;
-				background-color: #222;
-				border-left: 3px solid #4caf50;
+				margin-bottom: 12px;
+				padding: 12px;
+				background-color: var(--panel-bg);
+				border-left: 3px solid var(--primary);
+				border-radius: 6px;
+				transition: all 0.2s ease;
+			}
+
+			.impulse-entry:hover {
+				background-color: var(--highlight);
+				transform: translateX(2px);
 			}
 
 			.impulse-time {
-				color: #aaa;
-				font-size: 10px;
+				color: var(--text-secondary);
+				font-size: 11px;
 			}
 
 			.impulse-freq {
-				color: #4caf50;
-				font-weight: bold;
+				color: var(--primary);
+				font-weight: 600;
+				margin: 4px 0;
 			}
 
 			.impulse-data {
 				display: block;
-				margin-top: 3px;
-				color: #ddd;
+				margin-top: 4px;
+				color: var(--text);
 				word-break: break-all;
+			}
+
+			.info {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+				gap: 15px;
+				width: 100%;
+			}
+
+			.info div {
+				background-color: var(--panel-bg);
+				padding: 15px;
+				border-radius: 12px;
+				text-align: center;
+				backdrop-filter: blur(8px);
+				box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+				transition: transform 0.2s ease;
+			}
+
+			.info div:hover {
+				transform: translateY(-2px);
+			}
+
+			.info span {
+				font-size: 24px;
+				color: var(--primary);
+				display: block;
+				margin-top: 8px;
+				font-weight: 600;
+			}
+
+			/* Custom scrollbar */
+			::-webkit-scrollbar {
+				width: 8px;
+			}
+
+			::-webkit-scrollbar-track {
+				background: var(--bg-dark);
+				border-radius: 8px;
+			}
+
+			::-webkit-scrollbar-thumb {
+				background: var(--grid-lines);
+				border-radius: 8px;
+			}
+
+			::-webkit-scrollbar-thumb:hover {
+				background: var(--primary-dark);
+			}
+
+			@media (max-width: 768px) {
+				.main-content {
+					flex-direction: column;
+				}
+
+				.info {
+					grid-template-columns: 1fr 1fr;
+				}
 			}
 		</style>
 	</head>
@@ -137,7 +204,7 @@
 				</div>
 				<div>
 					Update Rate
-					<span id="updateRate (Samples/sec.)">0 sps</span>
+					<span id="updateRate">0 sps</span>
 				</div>
 				<div>
 					Last Impulse
@@ -154,7 +221,7 @@
 			const canvas = document.getElementById("fftCanvas");
 			const ctx = canvas.getContext("2d");
 			const dominantFreqElem = document.getElementById("dominantFreq");
-			const updateRateElem = document.getElementById("updateRate (Samples/sec.)");
+			const updateRateElem = document.getElementById("updateRate");
 
 			// Variables for SPS calculation
 			let sampleCount = 0;
@@ -162,7 +229,7 @@
 
 			// Variables to adjust the audio sampling rate and FFT Bin size
 			const SAMPLING_RATE = 48000; // Change this value in constants.rs too!
-			const FFT_LENGTH = 1024; // Change this value in constants.rs too!
+			const FFT_LENGTH = 2048; // Change this value in constants.rs too!
 			const FREQUENCY_MAGNITUDE_LENGHT = FFT_LENGTH / 2; // Change this value in constants.rs too!
 
 			// Audio frequency range
@@ -178,10 +245,22 @@
 			const coconutTypeElement = document.getElementById("coconutType");
 			const maxLogEntries = 50; // Maximum number of log entries to show
 
-			// Resize canvas to match display size
+			// Variables for dominant frequency animation
+			let currentDominantFreq = 0;
+			let targetDominantFreq = 0;
+
+			// Resize canvas with high DPI support
 			function resizeCanvas() {
-				canvas.width = canvas.offsetWidth;
-				canvas.height = canvas.offsetHeight;
+				const devicePixelRatio = window.devicePixelRatio || 1;
+				const rect = canvas.getBoundingClientRect();
+
+				canvas.width = rect.width * devicePixelRatio;
+				canvas.height = rect.height * devicePixelRatio;
+
+				ctx.scale(devicePixelRatio, devicePixelRatio);
+				canvas.style.width = `${rect.width}px`;
+				canvas.style.height = `${rect.height}px`;
+
 				drawFrequencyScale();
 			}
 
@@ -193,17 +272,17 @@
 
 			// Function to draw logarithmic frequency scale
 			function drawFrequencyScale() {
-				const width = canvas.width;
-				const height = canvas.height;
+				const rect = canvas.getBoundingClientRect();
+				const width = rect.width;
+				const height = rect.height;
 
-				ctx.fillStyle = "#000";
+				// Clear the canvas with the background color
+				ctx.fillStyle = "rgba(10, 15, 26, 1)";
 				ctx.fillRect(0, 0, width, height);
 
-				// Draw grid lines
-				ctx.strokeStyle = "#333";
+				// Draw horizontal grid lines (amplitude)
+				ctx.strokeStyle = "rgba(75, 85, 99, 0.3)";
 				ctx.lineWidth = 1;
-
-				// Horizontal grid lines (amplitude)
 				for (let i = 0; i < 10; i++) {
 					const y = height - (i * height) / 10;
 					ctx.beginPath();
@@ -212,16 +291,41 @@
 					ctx.stroke();
 				}
 
-				// Vertical grid lines (frequency - logarithmic)
+				// Define main frequency labels
 				const decades = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 22000];
-				ctx.fillStyle = "#FFFFFF";
-				ctx.font = "14px Arial";
 
+				// Draw intermediate vertical grid lines (logarithmic scale)
+				ctx.strokeStyle = "rgba(75, 85, 99, 0.3)"; // Same color as main lines
+				ctx.setLineDash([2, 2]); // Dashed lines for intermediate frequencies
+				const numSubdivisions = 4; // Number of intermediate lines between each pair
+				for (let i = 0; i < decades.length - 1; i++) {
+					const freq1 = decades[i];
+					const freq2 = decades[i + 1];
+					const logFreq1 = Math.log10(freq1);
+					const logFreq2 = Math.log10(freq2);
+					const logIncrement = (logFreq2 - logFreq1) / (numSubdivisions + 1);
+					for (let k = 1; k <= numSubdivisions; k++) {
+						const intermediateLogFreq = logFreq1 + k * logIncrement;
+						const intermediateFreq = Math.pow(10, intermediateLogFreq);
+						const x =
+							(width * (intermediateLogFreq - Math.log10(minFreq))) /
+							(Math.log10(maxFreq) - Math.log10(minFreq));
+						ctx.beginPath();
+						ctx.moveTo(x, 0);
+						ctx.lineTo(x, height);
+						ctx.stroke();
+					}
+				}
+				ctx.setLineDash([]); // Reset to solid lines
+
+				// Draw main vertical grid lines and labels
+				ctx.strokeStyle = "rgba(75, 85, 99, 0.3)";
+				ctx.fillStyle = "rgba(243, 244, 246, 0.8)";
+				ctx.font = "12px Inter, system-ui, sans-serif";
 				decades.forEach((freq) => {
 					const x =
 						(width * (Math.log10(freq) - Math.log10(minFreq))) /
 						(Math.log10(maxFreq) - Math.log10(minFreq));
-
 					ctx.beginPath();
 					ctx.moveTo(x, 0);
 					ctx.lineTo(x, height);
@@ -240,62 +344,183 @@
 					} else {
 						ctx.textAlign = "center";
 					}
-					ctx.fillText(label, x, height - 5);
+					ctx.fillText(label, x, height - 8);
 				});
 			}
 
-			// Function to update the spectrum visualization
+			// Function to update the spectrum visualization with smooth curves
 			function updateSpectrum(magnitudes, dominantFrequency) {
-				const width = canvas.width;
-				const height = canvas.height;
+				const rect = canvas.getBoundingClientRect();
+				const width = rect.width;
+				const height = rect.height;
 
 				// Clear and redraw the background
 				drawFrequencyScale();
 
-				// Smooth the magnitudes with a moving average
+				// Apply enhanced smoothing to the magnitudes with a wider window
 				let smoothed_magnitudes = [];
+				const smoothingFactor = 5; // Adjust this for more or less smoothing
+
 				for (let i = 0; i < magnitudes.length; i++) {
-					if (i === 0) {
-						smoothed_magnitudes[i] = (magnitudes[i] + magnitudes[i + 1]) / 2;
-					} else if (i === magnitudes.length - 1) {
-						smoothed_magnitudes[i] = (magnitudes[i - 1] + magnitudes[i]) / 2;
-					} else {
-						smoothed_magnitudes[i] =
-							(magnitudes[i - 1] + magnitudes[i] + magnitudes[i + 1]) / 3;
+					let sum = 0;
+					let count = 0;
+
+					for (
+						let j = Math.max(0, i - smoothingFactor);
+						j <= Math.min(magnitudes.length - 1, i + smoothingFactor);
+						j++
+					) {
+						const weight = 1 - Math.abs(i - j) / (smoothingFactor + 1);
+						sum += magnitudes[j] * weight;
+						count += weight;
 					}
+
+					smoothed_magnitudes[i] = sum / count;
 				}
 
-				// Draw the spectrum
-				ctx.beginPath();
-				ctx.moveTo(0, height);
+				// Create points for the curve with proper frequency mapping
+				const points = [];
 
 				for (let i = 1; i < smoothed_magnitudes.length; i++) {
 					const frequency = i * (SAMPLING_RATE / FFT_LENGTH);
 					if (frequency < minFreq || frequency > maxFreq) continue;
+
 					const x =
 						(width * (Math.log10(frequency) - Math.log10(minFreq))) /
 						(Math.log10(maxFreq) - Math.log10(minFreq));
+
 					const magnitude = Math.max(0.0000001, smoothed_magnitudes[i]);
 					const dB = 20 * Math.log10(magnitude);
-					const normalizedDb = (dB + 100) / 100; // Normalize to 0-1 (assuming -100dB to 0dB range)
+					const normalizedDb = (dB + 100) / 100; // Normalize to 0-1 (-100dB to 0dB range)
 					const y = height - normalizedDb * height;
-					ctx.lineTo(x, y);
+
+					points.push({ x, y });
+				}
+
+				// Add starting point at (0, height) to extend smoothness to the left edge
+				const startPoint = { x: 0, y: height };
+				points.unshift(startPoint);
+
+				// Draw the filled area with smooth Bezier curves
+				ctx.beginPath();
+				ctx.moveTo(points[0].x, points[0].y); // Start at (0, height)
+
+				for (let i = 0; i < points.length - 1; i++) {
+					const p0 =
+						i > 0
+							? points[i - 1]
+							: {
+									x: 2 * points[0].x - points[1].x,
+									y: 2 * points[0].y - points[1].y,
+								}; // Virtual point before start
+					const p1 = points[i];
+					const p2 = points[i + 1];
+					const p3 =
+						i < points.length - 2
+							? points[i + 2]
+							: {
+									x: 2 * points[i + 1].x - points[i].x,
+									y: 2 * points[i + 1].y - points[i].y,
+								}; // Virtual point after end
+
+					const cp1x = p1.x + (p2.x - p0.x) / 6;
+					const cp1y = p1.y + (p2.y - p0.y) / 6;
+					const cp2x = p2.x - (p3.x - p1.x) / 6;
+					const cp2y = p2.y - (p3.y - p1.y) / 6;
+
+					ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
 				}
 
 				ctx.lineTo(width, height);
 				ctx.closePath();
 
-				// Fill the spectrum area with gradient
+				// Fill with gradient
 				const gradient = ctx.createLinearGradient(0, 0, 0, height);
-				gradient.addColorStop(0, "rgba(76, 175, 80, 0.8)");
-				gradient.addColorStop(1, "rgba(76, 175, 80, 0.1)");
+				gradient.addColorStop(0, "rgba(74, 222, 128, 0.9)");
+				gradient.addColorStop(0.5, "rgba(74, 222, 128, 0.4)");
+				gradient.addColorStop(1, "rgba(74, 222, 128, 0.05)");
 				ctx.fillStyle = gradient;
 				ctx.fill();
 
-				// Update dominant frequency display
-				dominantFreqElem.textContent = dominantFrequency.toFixed(1) + " Hz";
+				// Draw the line with glow effect
+				ctx.beginPath();
+				ctx.moveTo(points[0].x, points[0].y); // Start at (0, height)
 
-				// Update SPS counter
+				for (let i = 0; i < points.length - 1; i++) {
+					const p0 =
+						i > 0
+							? points[i - 1]
+							: {
+									x: 2 * points[0].x - points[1].x,
+									y: 2 * points[0].y - points[1].y,
+								}; // Virtual point before start
+					const p1 = points[i];
+					const p2 = points[i + 1];
+					const p3 =
+						i < points.length - 2
+							? points[i + 2]
+							: {
+									x: 2 * points[i + 1].x - points[i].x,
+									y: 2 * points[i + 1].y - points[i].y,
+								}; // Virtual point after end
+
+					const cp1x = p1.x + (p2.x - p0.x) / 6;
+					const cp1y = p1.y + (p2.y - p0.y) / 6;
+					const cp2x = p2.x - (p3.x - p1.x) / 6;
+					const cp2y = p2.y - (p3.y - p1.y) / 6;
+
+					ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+				}
+
+				ctx.strokeStyle = "rgba(74, 222, 128, 0.8)";
+				ctx.lineWidth = 2;
+				ctx.stroke();
+
+				// Highlight dominant frequency (skip the starting point)
+				if (dominantFrequency >= minFreq && dominantFrequency <= maxFreq) {
+					const dominantX =
+						(width * (Math.log10(dominantFrequency) - Math.log10(minFreq))) /
+						(Math.log10(maxFreq) - Math.log10(minFreq));
+
+					ctx.beginPath();
+					ctx.moveTo(dominantX, 0);
+					ctx.lineTo(dominantX, height);
+					ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+					ctx.lineWidth = 1;
+					ctx.stroke();
+
+					let dominantY = height;
+					for (let i = 1; i < points.length; i++) {
+						// Start from i=1 to skip startPoint
+						const point = points[i];
+						const freqAtPoint = Math.pow(
+							10,
+							Math.log10(minFreq) +
+								(point.x / width) * (Math.log10(maxFreq) - Math.log10(minFreq)),
+						);
+						if (
+							Math.abs(freqAtPoint - dominantFrequency) <
+							SAMPLING_RATE / FFT_LENGTH
+						) {
+							dominantY = point.y;
+							break;
+						}
+					}
+
+					const pulseSize = 5 + 3 * Math.sin(Date.now() / 200);
+					ctx.beginPath();
+					ctx.arc(dominantX, dominantY, pulseSize, 0, Math.PI * 2);
+					ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+					ctx.fill();
+
+					ctx.beginPath();
+					ctx.arc(dominantX, dominantY, pulseSize / 2, 0, Math.PI * 2);
+					ctx.fillStyle = "rgba(74, 222, 128, 1)";
+					ctx.fill();
+				}
+
+				// Update UI elements
+				targetDominantFreq = dominantFrequency;
 				sampleCount++;
 				const now = performance.now();
 				if (now - lastSpsUpdateTime > 1000) {
@@ -306,11 +531,29 @@
 				}
 			}
 
+			// Animation loop for smooth dominant frequency updates
+			function animationLoop() {
+				if (Math.abs(currentDominantFreq - targetDominantFreq) > 0.1) {
+					currentDominantFreq += (targetDominantFreq - currentDominantFreq) * 0.1; // Adjust 0.1 for speed
+					dominantFreqElem.textContent = currentDominantFreq.toFixed(1) + " Hz";
+				} else {
+					currentDominantFreq = targetDominantFreq;
+					dominantFreqElem.textContent = targetDominantFreq.toFixed(1) + " Hz";
+				}
+				requestAnimationFrame(animationLoop);
+			}
+
+			// Start the animation loop
+			animationLoop();
+
 			// Establish WebSocket connection
 			const ws = new WebSocket("ws://192.168.71.1/ws");
 
 			ws.onopen = function () {
 				console.log("WebSocket connection established");
+				// Add a visual indicator that connection is established
+				document.querySelector("h1").innerHTML +=
+					' <span style="color: var(--text-secondary); font-size: 0.8rem; font-weight: normal;">● Connected</span>';
 			};
 
 			ws.onmessage = function (event) {
@@ -380,28 +623,41 @@
 						const date = new Date();
 						const formattedTimestamp = date.toLocaleTimeString();
 
+						// Format peaks in a more readable way
 						const peaksFormatted = peaks
 							.map(
-								(peak) =>
-									`${peak.frequency.toFixed(1)} Hz (${peak.magnitude.toFixed(4)})`,
+								(peak, idx) =>
+									`<span class="peak-item">${peak.frequency.toFixed(1)} Hz</span>`,
 							)
 							.join(", ");
 
-						// Update the coconut type
+						// Update the coconut type with animation
 						if (coconutType) {
 							coconutTypeElement.textContent = coconutType;
+							coconutTypeElement.style.animation = "pulse 0.5s ease";
+							setTimeout(() => {
+								coconutTypeElement.style.animation = "";
+							}, 500);
 						}
 
 						const entry = document.createElement("div");
 						entry.className = "impulse-entry";
 						entry.innerHTML = `
-                <div class="impulse-time">${formattedTimestamp}</div>
-                <div class="impulse-freq">Dominant: ${dominantFrequency.toFixed(1)} Hz</div>
-                <div class="impulse-data">Peaks: ${peaksFormatted}</div>
-                <div class="impulse-data">Type: ${coconutType || "Unknown"}</div>
+              <div class="impulse-time">${formattedTimestamp}</div>
+              <div class="impulse-freq">Dominant: ${dominantFrequency.toFixed(1)} Hz</div>
+              <div class="impulse-data">Peaks: ${peaksFormatted}</div>
+              <div class="impulse-data">Type: ${coconutType || "Unknown"}</div>
             `;
 
+						// Add a fade-in effect
+						entry.style.opacity = "0";
 						impulseLogElement.prepend(entry);
+
+						// Trigger reflow for animation
+						entry.offsetHeight;
+						entry.style.transition = "opacity 0.3s ease, transform 0.3s ease";
+						entry.style.opacity = "1";
+
 						while (impulseLogElement.children.length > maxLogEntries) {
 							impulseLogElement.removeChild(impulseLogElement.lastChild);
 						}
@@ -472,28 +728,41 @@
 							const date = new Date();
 							const formattedTimestamp = date.toLocaleTimeString();
 
+							// Format peaks in a more readable way
 							const peaksFormatted = peaks
 								.map(
-									(peak) =>
-										`${peak.frequency.toFixed(1)} Hz (${peak.magnitude.toFixed(4)})`,
+									(peak, idx) =>
+										`<span class="peak-item">${peak.frequency.toFixed(1)} Hz</span>`,
 								)
 								.join(", ");
 
-							// Update the coconut type
+							// Update the coconut type with animation
 							if (coconutType) {
 								coconutTypeElement.textContent = coconutType;
+								coconutTypeElement.style.animation = "pulse 0.5s ease";
+								setTimeout(() => {
+									coconutTypeElement.style.animation = "";
+								}, 500);
 							}
 
 							const entry = document.createElement("div");
 							entry.className = "impulse-entry";
 							entry.innerHTML = `
-                    <div class="impulse-time">${formattedTimestamp}</div>
-                    <div class="impulse-freq">Dominant: ${dominantFrequency.toFixed(1)} Hz</div>
-                    <div class="impulse-data">Peaks: ${peaksFormatted}</div>
-                    <div class="impulse-data">Type: ${coconutType || "Unknown"}</div>
-                `;
+                <div class="impulse-time">${formattedTimestamp}</div>
+                <div class="impulse-freq">Dominant: ${dominantFrequency.toFixed(1)} Hz</div>
+                <div class="impulse-data">Peaks: ${peaksFormatted}</div>
+                <div class="impulse-data">Type: ${coconutType || "Unknown"}</div>
+              `;
 
+							// Add a fade-in effect
+							entry.style.opacity = "0";
 							impulseLogElement.prepend(entry);
+
+							// Trigger reflow for animation
+							entry.offsetHeight;
+							entry.style.transition = "opacity 0.3s ease, transform 0.3s ease";
+							entry.style.opacity = "1";
+
 							while (impulseLogElement.children.length > maxLogEntries) {
 								impulseLogElement.removeChild(impulseLogElement.lastChild);
 							}
@@ -505,11 +774,39 @@
 
 			ws.onerror = function (error) {
 				console.error("WebSocket error:", error);
+				document.querySelector("h1").innerHTML +=
+					' <span style="color: #ef4444; font-size: 0.8rem; font-weight: normal;">● Connection Error</span>';
 			};
 
 			ws.onclose = function () {
 				console.log("WebSocket connection closed");
+				document.querySelector("h1").innerHTML +=
+					' <span style="color: #f59e0b; font-size: 0.8rem; font-weight: normal;">● Disconnected</span>';
+
+				// Add reconnection functionality
+				setTimeout(() => {
+					location.reload();
+				}, 5000);
 			};
+
+			// Add CSS animations
+			const style = document.createElement("style");
+			style.textContent = `
+        @keyframes pulse {
+          0% { transform: scale(1); }
+          50% { transform: scale(1.05); }
+          100% { transform: scale(1); }
+        }
+
+        .peak-item {
+          display: inline-block;
+          background: rgba(74, 222, 128, 0.1);
+          padding: 2px 6px;
+          border-radius: 4px;
+          margin: 2px;
+        }
+      `;
+			document.head.appendChild(style);
 		</script>
 	</body>
 </html>

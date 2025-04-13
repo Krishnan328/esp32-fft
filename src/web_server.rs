@@ -148,7 +148,7 @@ pub fn init_http_server(server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<EspHt
 			}
 
 			// Control update rate (~60 Hz)
-			std::thread::sleep(Duration::from_millis(AUDIO_UPDATE_PER_SECOND / 4));
+			std::thread::sleep(Duration::from_millis(AUDIO_SAMPLE_PER_SECOND / 4));
 		}
 		Ok::<(), EspIOError>(())
 	})?;
@@ -160,7 +160,6 @@ pub fn init_http_server(server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<EspHt
 pub fn spawn_wifi_thread(modem: Modem, server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<()> {
 	let config = ThreadSpawnConfiguration {
 		name: Some(b"Wifi Thread\0"),
-		stack_size: 8192,
 		priority: 5,
 		pin_to_core: Some(Core::Core1),
 		..Default::default()

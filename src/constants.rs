@@ -6,7 +6,7 @@ pub const SAMPLING_RATE: u32 = 48000; // Audio Sampling Rate in Hertz
 /// the FFT will process 2048 complex data points at once. This parameter determines the
 /// frequency resolution of your spectrum analysis - larger FFT sizes give you finer frequency
 /// resolution but require more computational resources and introduce more latency.
-pub const FFT_LENGTH: usize = 1024; // Keep 1024 for faster processing or 4096 for better resolution
+pub const FFT_LENGTH: usize = 2048; // Keep 1024 for faster processing or 4096 for better resolution
 
 pub const HANN_WINDOW_LENGHT: f32 = (FFT_LENGTH - 1) as f32;
 
@@ -30,7 +30,7 @@ pub static WIFI_SSID: &str = "ESP32-FFT-Analyzer";
 
 pub const WIFI_PASSWORD: &str = "spectrum123";
 
-pub const AUDIO_UPDATE_PER_SECOND: u64 = 8; // in milliseconds, for aps divide APS by 1000
+pub const AUDIO_SAMPLE_PER_SECOND: u64 = 2; // in milliseconds, for sps divide APS by 1000
 
 pub struct AmplitudeThreshold {
 	pub frequency_cutoff: f32,

@@ -1,14 +1,14 @@
 use anyhow::Result;
-use esp_idf_hal::modem::Modem;
-use esp_idf_svc::http::server::ws::EspHttpWsConnection;
-use esp_idf_svc::ws::FrameType;
+use esp_idf_svc::hal::cpu::Core;
+use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
 use esp_idf_svc::{
 	eventloop::EspSystemEventLoop,
-	http::server::{Configuration, EspHttpServer},
+	hal::modem::Modem,
+	http::server::{ws::EspHttpWsConnection, Configuration, EspHttpServer},
 	io::EspIOError,
 	nvs::EspDefaultNvsPartition,
-	wifi::AccessPointConfiguration,
-	wifi::{BlockingWifi, EspWifi},
+	wifi::{AccessPointConfiguration, BlockingWifi, EspWifi},
+	ws::FrameType,
 };
 use log::*;
 use std::{
@@ -148,7 +148,7 @@ pub fn init_http_server(server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<EspHt
 			}
 
 			// Control update rate (~60 Hz)
-			std::thread::sleep(Duration::from_millis(AUDIO_UPDATE_PER_SECOND / 2));
+			std::thread::sleep(Duration::from_millis(AUDIO_UPDATE_PER_SECOND / 4));
 		}
 		Ok::<(), EspIOError>(())
 	})?;
@@ -158,12 +158,24 @@ pub fn init_http_server(server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<EspHt
 }
 
 pub fn spawn_wifi_thread(modem: Modem, server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<()> {
+	let config = ThreadSpawnConfiguration {
+		name: Some(b"Wifi Thread\0"),
+		stack_size: 8192,
+		priority: 5,
+		pin_to_core: Some(Core::Core1),
+		..Default::default()
+	};
+	config.set().expect("Failed to set thread configuration");
 	let wifi_thread_builder = thread::Builder::new()
 		.stack_size(8192)
 		.name("Wi-Fi Server".into());
 
 	wifi_thread_builder
 		.spawn(move || {
+			info!(
+				"WiFi server thread running on core: {:#?}",
+				esp_idf_svc::hal::cpu::core()
+			);
 			let _wifi = init_wifi_ap(modem).expect("Failed to initialise Wi-Fi Access Point.");
 
 			let _server =

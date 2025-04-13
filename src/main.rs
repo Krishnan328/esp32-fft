@@ -3,17 +3,20 @@ mod web_server;
 
 use anyhow::Result;
 use constants::*;
-use esp_idf_hal::{
-	gpio::*,
-	i2s::{
-		config::{
-			Config, DataBitWidth, SlotMode, StdClkConfig, StdConfig, StdGpioConfig, StdSlotConfig,
+use esp_idf_svc::{
+	hal::{
+		gpio::*,
+		i2s::{
+			config::{
+				Config, DataBitWidth, SlotMode, StdClkConfig, StdConfig, StdGpioConfig,
+				StdSlotConfig,
+			},
+			I2sDriver,
 		},
-		I2sDriver,
+		peripherals::Peripherals,
 	},
-	peripherals::Peripherals,
+	log::EspLogger,
 };
-use esp_idf_svc::log::EspLogger;
 use log::{error, info};
 use rustfft::{num_complex::Complex, FftPlanner};
 use std::sync::{Arc, RwLock};
@@ -91,13 +94,17 @@ fn main() -> Result<()> {
 		.map(|i| 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / HANN_WINDOW_LENGHT).cos()))
 		.collect();
 	info!("hann_window initialized with length: {}", hann_window.len());
+	info!(
+		"FFT thread running on core: {:#?}",
+		esp_idf_svc::hal::cpu::core()
+	);
 
 	spawn_wifi_thread(modem, server_state).expect("Failed to spawn WiFi/server thread!");
 
 	let mut buffer: Vec<u8> = vec![0; FREQUENCY_MAGNITUDE_LENGHT];
 	let mut accumulated_buffer: Vec<u8> = vec![0; FFT_LENGTH_BYTES];
 	let mut acc_index = 0;
-	let timeout = 16;
+	let timeout = AUDIO_UPDATE_PER_SECOND as u32;
 
 	// Main FFT loop
 	loop {
@@ -255,11 +262,11 @@ fn main() -> Result<()> {
 					);
 
 					// Classify coconut type based on dominant frequency
-					let coconut_type = if (2000.0..=2500.0).contains(&frequency) {
+					let coconut_type = if (1900.0..=2800.0).contains(&frequency) {
 						"BROWN COCONUT"
-					} else if (750.0..=890.0).contains(&frequency) {
+					} else if (700.0..=899.0).contains(&frequency) {
 						"FLESHY COCONUT"
-					} else if (900.0..=1400.0).contains(&frequency) {
+					} else if (900.0..=1700.0).contains(&frequency) {
 						"WATER COCONUT"
 					} else {
 						"UNKNOWN"

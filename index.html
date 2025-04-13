@@ -137,7 +137,7 @@
 				</div>
 				<div>
 					Update Rate
-					<span id="updateRate">0 fps</span>
+					<span id="updateRate (Samples/sec.)">0 sps</span>
 				</div>
 				<div>
 					Last Impulse
@@ -154,15 +154,15 @@
 			const canvas = document.getElementById("fftCanvas");
 			const ctx = canvas.getContext("2d");
 			const dominantFreqElem = document.getElementById("dominantFreq");
-			const updateRateElem = document.getElementById("updateRate");
+			const updateRateElem = document.getElementById("updateRate (Samples/sec.)");
 
-			// Variables for FPS calculation
-			let frameCount = 0;
-			let lastFpsUpdateTime = 0;
+			// Variables for SPS calculation
+			let sampleCount = 0;
+			let lastSpsUpdateTime = 0;
 
 			// Variables to adjust the audio sampling rate and FFT Bin size
 			const SAMPLING_RATE = 48000; // Change this value in constants.rs too!
-			const FFT_LENGTH = 2048; // Change this value in constants.rs too!
+			const FFT_LENGTH = 1024; // Change this value in constants.rs too!
 			const FREQUENCY_MAGNITUDE_LENGHT = FFT_LENGTH / 2; // Change this value in constants.rs too!
 
 			// Audio frequency range
@@ -295,14 +295,14 @@
 				// Update dominant frequency display
 				dominantFreqElem.textContent = dominantFrequency.toFixed(1) + " Hz";
 
-				// Update FPS counter
-				frameCount++;
+				// Update SPS counter
+				sampleCount++;
 				const now = performance.now();
-				if (now - lastFpsUpdateTime > 1000) {
-					const fps = Math.round((frameCount * 1000) / (now - lastFpsUpdateTime));
-					updateRateElem.textContent = fps + " fps";
-					frameCount = 0;
-					lastFpsUpdateTime = now;
+				if (now - lastSpsUpdateTime > 1000) {
+					const sps = Math.round((sampleCount * 1000) / (now - lastSpsUpdateTime));
+					updateRateElem.textContent = sps + " sps";
+					sampleCount = 0;
+					lastSpsUpdateTime = now;
 				}
 			}
 

@@ -20,4 +20,4 @@ ESP32-FFT is a high-performance audio spectrum analyzer for ESP32 development bo
 Achieves impressive processing speeds on standard ESP32 hardware without requiring additional DSP chips or external processing.
 
 ## Licensing
-This code is open source but requires licensing for commercial applications. Please contact RedddFoxxyy for exclusive commercial licensing options. Check LICENSE and LICENSE-CC files.
+This code is open source but requires licensing for commercial applications. Please contact RedddFoxxyy( Suyog Tandel ) for exclusive commercial licensing options. Check LICENSE and LICENSE-CC files.

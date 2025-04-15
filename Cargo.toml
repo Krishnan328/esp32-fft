@@ -33,6 +33,8 @@ esp-idf-svc = { version = "0.51", features = [
 anyhow = "1.0.97"
 rustfft = "6.2.0"
 # esp-idf-hal = {version = "0.45.2", features = []}
+embedded-graphics = "0.8.1"
+ssd1306 = "0.10.0"
 #tokio = { version = "1.0.0", features = ["rt", "rt-multi-thread", "macros", "time"] }
 #time = "0.3.40"
 

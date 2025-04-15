@@ -63,9 +63,6 @@ pub fn init_http_server(server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<EspHt
 	let mut server =
 		EspHttpServer::new(&Configuration::default()).expect("Failed to create HTTP server");
 
-	let server_state_ws = server_state.clone();
-	// let server_state_fft = server_state.clone();
-
 	// Serve the main HTML page
 	server
 		.fn_handler("/", esp_idf_svc::http::Method::Get, move |request| {
@@ -82,7 +79,7 @@ pub fn init_http_server(server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<EspHt
 		loop {
 			// Access the latest FFT data
 			let current_data = {
-				let read_guard = server_state_ws.read().unwrap();
+				let read_guard = server_state.read().unwrap();
 				read_guard.clone()
 			};
 
@@ -148,7 +145,7 @@ pub fn init_http_server(server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<EspHt
 			}
 
 			// Control update rate (~60 Hz)
-			std::thread::sleep(Duration::from_millis(AUDIO_SAMPLE_PER_SECOND / 4));
+			std::thread::sleep(Duration::from_millis(AUDIO_SAMPLE_DELTA));
 		}
 		Ok::<(), EspIOError>(())
 	})?;
@@ -181,7 +178,7 @@ pub fn spawn_wifi_thread(modem: Modem, server_state: Arc<RwLock<Arc<FFTData>>>) 
 				init_http_server(server_state).expect("Failed to initialise HTTP server.");
 
 			loop {
-				thread::sleep(Duration::from_millis(1000));
+				std::thread::sleep(Duration::from_millis(1000));
 			}
 		})
 		.expect("Failed to spawn WiFi/server thread!");

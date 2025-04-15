@@ -30,7 +30,7 @@ pub static WIFI_SSID: &str = "ESP32-FFT-Analyzer";
 
 pub const WIFI_PASSWORD: &str = "spectrum123";
 
-pub const AUDIO_SAMPLE_PER_SECOND: u64 = 2; // in milliseconds, for sps divide APS by 1000
+pub const AUDIO_SAMPLE_DELTA: u64 = 2; // in milliseconds, for sps divide APS by 1000
 
 pub struct AmplitudeThreshold {
 	pub frequency_cutoff: f32,

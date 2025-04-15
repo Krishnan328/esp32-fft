@@ -1,8 +1,10 @@
 mod constants;
+mod display;
 mod web_server;
 
 use anyhow::Result;
 use constants::*;
+use display::spawn_display_thread;
 use esp_idf_svc::{
 	hal::{
 		gpio::*,
@@ -23,7 +25,6 @@ use std::sync::{Arc, RwLock};
 use web_server::*;
 
 // Shared state between FFT processing and web server
-
 struct FFTData {
 	magnitudes: [f32; FREQUENCY_MAGNITUDE_LENGHT],
 	dominant_frequency: f32,
@@ -43,15 +44,23 @@ fn main() -> Result<()> {
 	let pins = peripherals.pins;
 	let modem = peripherals.modem;
 
+	// Extract what you need for the display thread
+	let i2c0 = peripherals.i2c0;
+	let sda_pin = pins.gpio14;
+	let scl_pin = pins.gpio27;
+
+	// Extract what you need for I2S
+	let i2s0 = peripherals.i2s0;
+	let i2s_sck = pins.gpio4;
+	let i2s_sd = pins.gpio22;
+	let i2s_ws = pins.gpio21;
+
 	// Configure button pin as input with pull-down
 	let mut button = PinDriver::input(pins.gpio0.downgrade())?;
 	button.set_pull(Pull::Down)?; // Configure with pull-down resistor
 
-	// Create shared state for FFT data with RwLock
-	// let system_state: Arc<RwLock<SystemState>> = Arc::new(RwLock::new(SystemState {
-	// 	magnitudes: vec![0.0; FREQUENCY_MAGNITUDE_LENGHT],
-	// 	dominant_frequency: 0.0,
-	// }));
+	let mut previous_button_state = Level::High; // Start with button not pressed
+	let mut recording_enabled = false; // Toggle state for recording
 
 	let system_state: Arc<RwLock<Arc<FFTData>>> = Arc::new(RwLock::new(Arc::new(FFTData {
 		magnitudes: [0.0; FREQUENCY_MAGNITUDE_LENGHT],
@@ -62,6 +71,7 @@ fn main() -> Result<()> {
 
 	// Clone state for the Wi-Fi/server thread
 	let server_state = system_state.clone();
+	let display_state = system_state.clone();
 
 	// Configure and initialize the I2S driver
 	let clock_config = StdClkConfig::from_sample_rate_hz(SAMPLING_RATE);
@@ -74,12 +84,12 @@ fn main() -> Result<()> {
 	);
 
 	let mut i2s = I2sDriver::new_std_rx(
-		peripherals.i2s0,
+		i2s0,
 		&config,
-		pins.gpio4,  // sck
-		pins.gpio22, // sd
+		i2s_sck, // sck
+		i2s_sd,  // sd
 		None::<AnyIOPin>,
-		pins.gpio21, // ws
+		i2s_ws, // ws
 	)?;
 
 	// Enable I2S receiver
@@ -100,47 +110,48 @@ fn main() -> Result<()> {
 	);
 
 	spawn_wifi_thread(modem, server_state).expect("Failed to spawn WiFi/server thread!");
+	spawn_display_thread(display_state, i2c0, sda_pin, scl_pin);
 
 	let mut buffer: Vec<u8> = vec![0; FREQUENCY_MAGNITUDE_LENGHT];
 	let mut accumulated_buffer: Vec<u8> = vec![0; FFT_LENGTH_BYTES];
 	let mut acc_index = 0;
-	let timeout = AUDIO_SAMPLE_PER_SECOND as u32;
+	let timeout = AUDIO_SAMPLE_DELTA as u32;
 
 	// Main FFT loop
 	loop {
-		let is_button_pressed = button.get_level() == Level::High;
-		// let is_button_pressed = true;
+		let current_button_state = button.get_level();
 
-		// Update recording state in shared data
-		let current_state = {
-			let read_guard = system_state.read().unwrap();
-			let current_data = read_guard.clone();
+		// Detect button press (transition from High to Low)
+		if previous_button_state == Level::High && current_button_state == Level::Low {
+			// Button was just pressed - toggle recording state
+			recording_enabled = !recording_enabled;
 
-			// If state changed, log it
-			if current_data.is_recording != is_button_pressed {
-				if is_button_pressed {
-					info!("Button pressed: Starting FFT recording");
-				} else {
-					info!("Button released: Pausing FFT recording");
-					// Reset buffer when stopping recording
-					acc_index = 0;
-				}
+			if recording_enabled {
+				info!("Button pressed: Starting FFT recording");
+			} else {
+				info!("Button pressed: Stopping FFT recording");
+				// Reset buffer when stopping recording
+				acc_index = 0;
 			}
 
-			current_data
-		};
+			// Update shared state with new recording status
+			let current_state = {
+				let read_guard = system_state.read().unwrap();
+				read_guard.clone()
+			};
 
-		// If recording state changed, update shared state
-		if current_state.is_recording != is_button_pressed {
 			*system_state.write().unwrap() = Arc::new(FFTData {
 				magnitudes: current_state.magnitudes,
 				dominant_frequency: current_state.dominant_frequency,
-				is_recording: is_button_pressed,
+				is_recording: recording_enabled,
 				latest_impulse: None,
 			});
 		}
 
-		if is_button_pressed {
+		// Save current state for next comparison
+		previous_button_state = current_button_state;
+
+		if recording_enabled {
 			while acc_index < FFT_LENGTH_BYTES {
 				match i2s.read(&mut buffer, timeout) {
 					Ok(bytes_read) => {
@@ -306,7 +317,7 @@ fn main() -> Result<()> {
 			}
 		} else {
 			// Small delay to avoid busy-waiting when not recording
-			std::thread::sleep(std::time::Duration::from_millis(AUDIO_SAMPLE_PER_SECOND));
+			std::thread::sleep(std::time::Duration::from_millis(AUDIO_SAMPLE_DELTA));
 		}
 	}
 }

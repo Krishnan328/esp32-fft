@@ -180,9 +180,7 @@ pub fn spawn_wifi_thread(modem: Modem, server_state: Arc<RwLock<Arc<FFTData>>>) 
 			let _server =
 				init_http_server(server_state).expect("Failed to initialise HTTP server.");
 
-			loop {
-				thread::sleep(Duration::from_millis(1000));
-			}
+			thread::park();
 		})
 		.expect("Failed to spawn WiFi/server thread!");
 	Ok(())

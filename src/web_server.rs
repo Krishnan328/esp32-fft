@@ -1,14 +1,14 @@
 use anyhow::Result;
-use esp_idf_hal::modem::Modem;
-use esp_idf_svc::http::server::ws::EspHttpWsConnection;
-use esp_idf_svc::ws::FrameType;
+use esp_idf_svc::hal::cpu::Core;
+use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
 use esp_idf_svc::{
 	eventloop::EspSystemEventLoop,
-	http::server::{Configuration, EspHttpServer},
+	hal::modem::Modem,
+	http::server::{ws::EspHttpWsConnection, Configuration, EspHttpServer},
 	io::EspIOError,
 	nvs::EspDefaultNvsPartition,
-	wifi::AccessPointConfiguration,
-	wifi::{BlockingWifi, EspWifi},
+	wifi::{AccessPointConfiguration, BlockingWifi, EspWifi},
+	ws::FrameType,
 };
 use log::*;
 use std::{
@@ -63,9 +63,6 @@ pub fn init_http_server(server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<EspHt
 	let mut server =
 		EspHttpServer::new(&Configuration::default()).expect("Failed to create HTTP server");
 
-	let server_state_ws = server_state.clone();
-	// let server_state_fft = server_state.clone();
-
 	// Serve the main HTML page
 	server
 		.fn_handler("/", esp_idf_svc::http::Method::Get, move |request| {
@@ -82,7 +79,7 @@ pub fn init_http_server(server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<EspHt
 		loop {
 			// Access the latest FFT data
 			let current_data = {
-				let read_guard = server_state_ws.read().unwrap();
+				let read_guard = server_state.read().unwrap();
 				read_guard.clone()
 			};
 
@@ -92,30 +89,54 @@ pub fn init_http_server(server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<EspHt
 				fft_data.extend_from_slice(&mag.to_le_bytes());
 			}
 			fft_data.extend_from_slice(&current_data.dominant_frequency.to_le_bytes());
-			if ws.send(FrameType::Binary(false), &fft_data).is_err() {
+
+			// Add a header byte to indicate this is FFT data (e.g., 0x01)
+			let mut message = vec![0x01];
+			message.extend_from_slice(&fft_data);
+
+			if ws.send(FrameType::Binary(false), &message).is_err() {
 				info!("WebSocket client disconnected");
 				break;
 			}
 
-			// Send impulse data as JSON if new
+			// Send impulse data as binary if new
 			if let Some(impulse) = &current_data.latest_impulse {
 				if last_impulse_timestamp != Some(impulse.timestamp) {
-					let peaks_json = impulse
-						.peaks
-						.iter()
-						.map(|peak| {
-							format!(
-								"{{\"index\":{},\"frequency\":{},\"magnitude\":{}}}",
-								peak.index, peak.frequency, peak.magnitude
-							)
-						})
-						.collect::<Vec<String>>()
-						.join(",");
-					let json = format!(
-						"{{\"timestamp\":{},\"dominantFrequency\":{},\"peaks\":[{}]}}",
-						impulse.timestamp, impulse.dominant_frequency, peaks_json
-					);
-					if ws.send(FrameType::Text(false), json.as_bytes()).is_err() {
+					// Create binary message for impulse data
+					let mut impulse_data = Vec::new();
+
+					// Add a header byte to indicate this is impulse data (e.g., 0x02)
+					impulse_data.push(0x02);
+
+					// Add timestamp (8 bytes)
+					impulse_data.extend_from_slice(&impulse.timestamp.to_le_bytes());
+
+					// Add dominant frequency (4 bytes)
+					impulse_data.extend_from_slice(&impulse.dominant_frequency.to_le_bytes());
+
+					// Add number of peaks (1 byte should be enough)
+					impulse_data.push(impulse.peaks.len() as u8);
+
+					// Add each peak data
+					for peak in &impulse.peaks {
+						// Add index (2 bytes should be enough)
+						impulse_data.extend_from_slice(&(peak.index as u16).to_le_bytes());
+
+						// Add frequency (4 bytes)
+						impulse_data.extend_from_slice(&peak.frequency.to_le_bytes());
+
+						// Add magnitude (4 bytes)
+						impulse_data.extend_from_slice(&peak.magnitude.to_le_bytes());
+					}
+
+					// Add coconut type string length (1 byte)
+					let coconut_type_bytes = impulse.coconut_type.as_bytes();
+					impulse_data.push(coconut_type_bytes.len() as u8);
+
+					// Add coconut type string
+					impulse_data.extend_from_slice(coconut_type_bytes);
+
+					if ws.send(FrameType::Binary(false), &impulse_data).is_err() {
 						info!("WebSocket client disconnected");
 						break;
 					}
@@ -124,7 +145,7 @@ pub fn init_http_server(server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<EspHt
 			}
 
 			// Control update rate (~60 Hz)
-			std::thread::sleep(Duration::from_millis(8));
+			std::thread::sleep(Duration::from_millis(AUDIO_SAMPLE_DELTA));
 		}
 		Ok::<(), EspIOError>(())
 	})?;
@@ -134,19 +155,30 @@ pub fn init_http_server(server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<EspHt
 }
 
 pub fn spawn_wifi_thread(modem: Modem, server_state: Arc<RwLock<Arc<FFTData>>>) -> Result<()> {
+	let config = ThreadSpawnConfiguration {
+		name: Some(b"Wifi Thread\0"),
+		priority: 5,
+		pin_to_core: Some(Core::Core1),
+		..Default::default()
+	};
+	config.set().expect("Failed to set thread configuration");
 	let wifi_thread_builder = thread::Builder::new()
 		.stack_size(8192)
 		.name("Wi-Fi Server".into());
 
 	wifi_thread_builder
 		.spawn(move || {
+			info!(
+				"WiFi server thread running on core: {:#?}",
+				esp_idf_svc::hal::cpu::core()
+			);
 			let _wifi = init_wifi_ap(modem).expect("Failed to initialise Wi-Fi Access Point.");
 
 			let _server =
 				init_http_server(server_state).expect("Failed to initialise HTTP server.");
 
 			loop {
-				thread::sleep(Duration::from_millis(1000));
+				std::thread::sleep(Duration::from_millis(1000));
 			}
 		})
 		.expect("Failed to spawn WiFi/server thread!");
